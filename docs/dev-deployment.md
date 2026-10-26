@@ -118,6 +118,8 @@ rm -f data/stock_cash_streaming.sqlite3-wal data/stock_cash_streaming.sqlite3-sh
 
 > 快照日期：2026-10-26；SHA256：`36343fa915fbd6671fa5a142b7d0dd66e6009a6597aee16d67cdfd427d19e8b2`
 > 快照不含 `fact_factor` / `fact_financial_revision`，恢复后必须跑一次 `cli factors`；修订表可选 `cli revisions --backfill`。
+> 首次使用前，需要在开发机把包含快照的提交 `git push origin main`，服务器才能拉到该文件。
+> 快照适合一次性迁移；如果每天同步数据，建议用 rsync 或腾讯云 COS，避免 Git 历史持续膨胀。
 
 **方式 B：从开发机直接 rsync（不走 GitHub）**
 
