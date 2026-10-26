@@ -1,0 +1,9 @@
+sectors:
+  - name: 电网设备
+    type: industry          # 用于同花顺行业资金流
+    sina_label: gn_zndw     # 新浪概念「智能电网」作为成分代理
+    note: 东财成分接口受限，改用新浪概念“智能电网”成分
+  - name: 天然气
+    type: concept           # 用于同花顺概念资金流
+    sina_label: hangye_ZD45 # 新浪行业「燃气生产和供应业」作为成分代理
+    note: 东财成分接口受限，改用新浪行业“燃气生产和供应业”成分

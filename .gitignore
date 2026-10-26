@@ -1,0 +1,21 @@
+# --- 虚拟环境与缓存 ---
+.venv/
+.venv.linux.bak/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# --- 密钥与本地配置 ---
+.env
+config/local.yaml
+
+# --- 数据与产物 ---
+data/
+*.sqlite
+*.sqlite3
+*.db
+logs/
+
+# --- 系统 ---
+.DS_Store

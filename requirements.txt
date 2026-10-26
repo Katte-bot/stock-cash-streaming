@@ -1,0 +1,43 @@
+# A股板块资金流横向对比与轮动量化系统 —— 依赖清单
+# 安装： .venv/bin/pip install -r requirements.txt
+# 若企业源异常： .venv/bin/pip install -i https://pypi.org/simple -r requirements.txt
+
+# --- 数据处理与计算 ---
+pandas>=2.2
+numpy>=1.26
+scipy>=1.13
+
+# --- A股数据源（免 Key，主源） ---
+akshare>=1.14
+# 行情第三备源（免费）
+baostock>=0.8
+
+# --- 服务层 ---
+fastapi>=0.111
+uvicorn[standard]>=0.30
+jinja2>=3.1
+websockets>=12.0
+
+# --- 调度 ---
+apscheduler>=3.10
+
+# --- 配置与校验 ---
+pydantic>=2.7
+pydantic-settings>=2.2
+python-dotenv>=1.0
+pyyaml>=6.0
+
+# --- 网络与存储 ---
+requests>=2.32
+httpx>=0.27
+sqlalchemy>=2.0
+
+# --- 日志与工具 ---
+loguru>=0.7
+tqdm>=4.66
+
+# --- AI 日报（OpenAI 兼容，可指向 DeepSeek） ---
+openai>=1.30
+
+# --- 测试 ---
+pytest>=8.2

@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: stock-cash-streaming
+Version: 0.1.0
+Summary: A股板块资金流横向对比与轮动量化系统
+Requires-Python: >=3.12

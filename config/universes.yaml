@@ -1,0 +1,40 @@
+# 行业股票池定义（C2/C3）
+# 成分来源：新浪板块成分（证监会行业 hangye_* / 新浪行业 new_*），
+# 刷新时自动剔除 ST/*ST/退市名称与 B 股（900/200 开头）。
+universes:
+  C2:
+    name: C2 防御行业池
+    description: 电网设备 + 燃气 + 电力公用事业 + 水务
+    sources:
+      - name: 电网设备
+        sina_label: gn_zndw
+      - name: 天然气
+        sina_label: hangye_ZD45
+      - name: 电力公用事业
+        sina_label: hangye_ZD44
+      - name: 水务
+        sina_label: hangye_ZD46
+
+  C3:
+    name: C3 防御扩展池
+    description: C2 + 高速公路 + 港口 + 铁路 + 通信运营
+    sources:
+      - name: 电网设备
+        sina_label: gn_zndw
+      - name: 天然气
+        sina_label: hangye_ZD45
+      - name: 电力公用事业
+        sina_label: hangye_ZD44
+      - name: 水务
+        sina_label: hangye_ZD46
+      - name: 高速公路
+        sina_label: new_glql
+        name_filter: 高速
+      - name: 港口
+        sina_label: new_jtys
+        name_filter: 港
+      - name: 铁路
+        sina_label: hangye_ZG53
+      - name: 通信运营
+        sina_label: hangye_ZI63
+        name_filter: 通信|电信|移动|联通|广电|卫星
