@@ -21,8 +21,8 @@ from datetime import datetime
 import pandas as pd
 
 from ..common.logging import logger
-from ..datasource.akshare_src import infer_market
 from ..storage.repository import Repository
+from .disclosure import fetch_dividends, fetch_ipo_date, fetch_report_pub_dates
 
 # 新浪财务摘要中需要保留的指标：(选项, 指标) -> 入库名
 METRIC_MAP = {
@@ -44,10 +44,6 @@ METRIC_MAP = {
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def bs_code(symbol: str) -> str:
-    return f"{infer_market(symbol)}.{symbol}"
 
 
 def _deadline(stat_date: str) -> str:
@@ -111,72 +107,23 @@ def fetch_financial_abstract(symbol: str, start_year: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ---------- Baostock：公告日 / 分红 / 基础信息 ----------
+# ---------- 公告日 / 分红 / 基础信息（巨潮 + 新浪） ----------
 
-def _bs_login():
-    import baostock as bs
-
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"Baostock 登录失败: {lg.error_msg}")
-    return bs
+def _fetch_pub_dates(symbol: str, start_year: int, end_year: int) -> dict[str, str]:
+    """{stat_date: pub_date}，来自巨潮定期报告公告（取最早披露日）。"""
+    return fetch_report_pub_dates(symbol, start_year, end_year)
 
 
-def _fetch_pub_dates(bs, symbol: str, start_year: int, end_year: int) -> dict[str, str]:
-    """{stat_date: pub_date}，来自季度业绩数据的 pubDate。"""
-    out: dict[str, str] = {}
-    code = bs_code(symbol)
-    for year in range(start_year, end_year + 1):
-        for q in (1, 2, 3, 4):
-            try:
-                rs = bs.query_profit_data(code=code, year=year, quarter=q)
-                while rs.error_code == "0" and rs.next():
-                    row = dict(zip(rs.fields, rs.get_row_data()))
-                    stat, pub = row.get("statDate"), row.get("pubDate")
-                    if stat and pub:
-                        out[stat] = pub
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"Baostock 公告日失败 {symbol} {year}Q{q}: {e}")
-            time.sleep(0.02)
-    return out
+def _fetch_dividends(symbol: str, start_year: int, end_year: int) -> list[dict]:
+    """分红明细（新浪），字段与 fact_dividend 对齐。"""
+    return fetch_dividends(symbol, start_year, end_year)
 
 
-def _fetch_dividends(bs, symbol: str, start_year: int, end_year: int) -> list[dict]:
-    code = bs_code(symbol)
-    rows: list[dict] = []
-    for year in range(start_year, end_year + 1):
-        try:
-            rs = bs.query_dividend_data(code=code, year=year, yearType="report")
-            while rs.error_code == "0" and rs.next():
-                r = dict(zip(rs.fields, rs.get_row_data()))
-                announce = r.get("dividPlanAnnounceDate") or r.get("dividPreNoticeDate") or ""
-                ex_date = r.get("dividOperateDate") or ""
-                cash = _to_float(r.get("dividCashPsBeforeTax")) or 0.0
-                stock = _to_float(r.get("dividStocksPs")) or 0.0
-                if not announce or (cash <= 0 and stock <= 0):
-                    continue
-                rows.append({"symbol": symbol, "announce_date": announce, "ex_date": ex_date,
-                             "cash_ps": cash, "stock_ps": stock})
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Baostock 分红失败 {symbol} {year}: {e}")
-        time.sleep(0.02)
-    return rows
-
-
-def _fetch_basic(bs, symbol: str) -> dict | None:
-    try:
-        rs = bs.query_stock_basic(code=bs_code(symbol))
-        if rs.error_code == "0" and rs.next():
-            r = dict(zip(rs.fields, rs.get_row_data()))
-            return {
-                "symbol": symbol,
-                "ipo_date": r.get("ipoDate") or None,
-                "out_date": r.get("outDate") or None,
-                "status": "normal" if r.get("status") == "1" else "delisted",
-            }
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"Baostock 基础信息失败 {symbol}: {e}")
-    return None
+def _fetch_basic(symbol: str) -> dict | None:
+    ipo = fetch_ipo_date(symbol)
+    if not ipo:
+        return None
+    return {"symbol": symbol, "ipo_date": ipo, "status": "normal"}
 
 
 # ---------- 修订版本 ----------
@@ -267,92 +214,92 @@ def revision_report(repo: Repository, limit: int = 20) -> dict:
 def sync_fundamentals(repo: Repository, symbols: list[str], start_year: int = 2017,
                       end_year: int | None = None, with_dividend: bool = True,
                       with_basic: bool = True) -> dict:
-    """逐只同步财务指标、公告日、分红与上市/退市信息（幂等）。"""
+    """逐只同步财务指标、公告日、分红与上市/退市信息（幂等）。
+
+    数据源：新浪财务摘要/分红/公司资料 + 巨潮资讯定期报告公告日。
+    所有网络请求均带超时与重试，单只失败不会中断整体同步。
+    """
     end_year = end_year or datetime.now().year
     stats = {"symbols": len(symbols), "financial": 0, "revisions": 0,
              "dividend": 0, "basic": 0, "fail": 0}
-    bs = _bs_login()
-    try:
-        for i, sym in enumerate(symbols, 1):
-            now = _now()
-            # 1) 财务指标（新浪）+ 公告日（Baostock）
+    for i, sym in enumerate(symbols, 1):
+        now = _now()
+        # 1) 财务指标（新浪）+ 公告日（巨潮）
+        try:
+            fin = fetch_financial_abstract(sym, start_year)
+            if not fin.empty:
+                pub = _fetch_pub_dates(sym, start_year, end_year)
+                fin["pub_date"] = fin["stat_date"].map(
+                    lambda d: pub.get(d) or _deadline(d))
+                fin["symbol"] = sym
+                fin["src"] = "sina:financial_abstract+cninfo:pubdate"
+                fin["fetched_at"] = now
+                # 同一指标同报告期可能多行（重复选项），去重
+                fin = fin.drop_duplicates(["symbol", "stat_date", "metric"])
+                rec = record_financial_revisions(repo, sym, fin, fin["src"].iloc[0])
+                stats["revisions"] += rec["revisions"]
+                stats["financial"] += repo.upsert(
+                    "fact_financial",
+                    fin[["symbol", "stat_date", "pub_date", "metric", "value", "src",
+                         "fetched_at"]].to_dict("records"),
+                    ["symbol", "stat_date", "metric"],
+                )
+            else:
+                logger.warning(f"{sym} 财务摘要为空")
+        except Exception as e:  # noqa: BLE001
+            stats["fail"] += 1
+            logger.warning(f"{sym} 财务同步失败: {e}")
+
+        # 2) 分红
+        if with_dividend:
             try:
-                fin = fetch_financial_abstract(sym, start_year)
-                if not fin.empty:
-                    pub = _fetch_pub_dates(bs, sym, start_year, end_year)
-                    fin["pub_date"] = fin["stat_date"].map(lambda d: pub.get(d) or _deadline(d))
-                    fin["symbol"] = sym
-                    fin["src"] = "sina:financial_abstract+baostock:pubdate"
-                    fin["fetched_at"] = now
-                    # 同一指标同报告期可能多行（重复选项），去重
-                    fin = fin.drop_duplicates(["symbol", "stat_date", "metric"])
-                    rec = record_financial_revisions(repo, sym, fin, "sina:financial_abstract+baostock:pubdate")
-                    stats["revisions"] += rec["revisions"]
-                    stats["financial"] += repo.upsert(
-                        "fact_financial",
-                        fin[["symbol", "stat_date", "pub_date", "metric", "value", "src", "fetched_at"]]
-                        .to_dict("records"),
-                        ["symbol", "stat_date", "metric"],
-                    )
-                else:
-                    logger.warning(f"{sym} 财务摘要为空")
+                div = _fetch_dividends(sym, start_year, end_year)
+                if div:
+                    for r in div:
+                        r.update({"src": "sina:dividend", "fetched_at": now})
+                    stats["dividend"] += repo.upsert(
+                        "fact_dividend", div, ["symbol", "announce_date", "ex_date"])
             except Exception as e:  # noqa: BLE001
-                stats["fail"] += 1
-                logger.warning(f"{sym} 财务同步失败: {e}")
+                logger.warning(f"{sym} 分红同步失败: {e}")
 
-            # 2) 分红
-            if with_dividend:
-                try:
-                    div = _fetch_dividends(bs, sym, start_year, end_year)
-                    if div:
-                        for r in div:
-                            r.update({"src": "baostock:dividend", "fetched_at": now})
-                        stats["dividend"] += repo.upsert(
-                            "fact_dividend", div,
-                            ["symbol", "announce_date", "ex_date"],
-                        )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(f"{sym} 分红同步失败: {e}")
-
-            # 3) 上市/退市
-            if with_basic:
-                basic = _fetch_basic(bs, sym)
+        # 3) 上市/退市
+        if with_basic:
+            try:
+                basic = _fetch_basic(sym)
                 if basic:
                     basic["updated_at"] = now
                     repo.upsert("dim_stock", [basic], ["symbol"])
                     stats["basic"] += 1
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"{sym} 上市日同步失败: {e}")
 
-            if i % 5 == 0:
-                logger.info(f"  基本面进度 {i}/{len(symbols)}")
+        if i % 5 == 0:
+            logger.info(f"  基本面进度 {i}/{len(symbols)}")
+        time.sleep(0.2)
 
-        repo.set_watermark("fact_financial", datetime.now().strftime("%Y-%m-%d"))
-    finally:
-        bs.logout()
+    repo.set_watermark("fact_financial", datetime.now().strftime("%Y-%m-%d"))
     logger.info(f"基本面同步完成: {stats}")
     return stats
 
 
 def rebuild_missing_pub_dates(repo: Repository) -> int:
-    """为已有财务记录补齐缺失的 pub_date（使用 Baostock，失败则用法定截止日）。"""
-    rows = repo.query("SELECT DISTINCT symbol, stat_date FROM fact_financial WHERE pub_date IS NULL OR pub_date=''")
+    """为已有财务记录补齐缺失的 pub_date（巨潮公告日，失败则用法定截止日）。"""
+    rows = repo.query("SELECT DISTINCT symbol, stat_date FROM fact_financial "
+                      "WHERE pub_date IS NULL OR pub_date=''")
     if not rows:
         return 0
-    bs = _bs_login()
     n = 0
-    try:
-        by_symbol: dict[str, list[str]] = {}
-        for r in rows:
-            by_symbol.setdefault(r["symbol"], []).append(r["stat_date"])
-        for sym, stats_dates in by_symbol.items():
-            years = sorted({int(d[:4]) for d in stats_dates})
-            pub = _fetch_pub_dates(bs, sym, min(years), max(years))
-            for d in stats_dates:
-                repo.conn.execute(
-                    "UPDATE fact_financial SET pub_date=? WHERE symbol=? AND stat_date=?",
-                    (pub.get(d) or _deadline(d), sym, d),
-                )
-                n += 1
-        repo.conn.commit()
-    finally:
-        bs.logout()
+    by_symbol: dict[str, list[str]] = {}
+    for r in rows:
+        by_symbol.setdefault(r["symbol"], []).append(r["stat_date"])
+    for sym, stat_dates in by_symbol.items():
+        years = sorted({int(d[:4]) for d in stat_dates})
+        pub = _fetch_pub_dates(sym, min(years), max(years))
+        for d in stat_dates:
+            repo.conn.execute(
+                "UPDATE fact_financial SET pub_date=? WHERE symbol=? AND stat_date=?",
+                (pub.get(d) or _deadline(d), sym, d),
+            )
+            n += 1
+    repo.conn.commit()
     return n

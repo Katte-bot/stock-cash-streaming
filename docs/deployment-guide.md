@@ -2,6 +2,7 @@
 
 适用版本：2026-10（Python 3.12 + FastAPI + SQLite 单机）。
 配套文档：日常运维与中断恢复见 [operations-runbook.md](./operations-runbook.md)。
+自用/开发调试可参考更简单的 [开发模式部署](./dev-deployment.md)（tmux + `uvicorn --reload`，无需 systemd/Nginx）。
 
 > 本系统是**单机、单写者**架构：SQLite 数据库由「Web 服务（只读为主）+ 每日流水线（写入）」共用。
 > 不要把同一份数据库挂到多台机器同时写，也不要开多个 uvicorn worker。
