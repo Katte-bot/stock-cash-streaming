@@ -16,6 +16,7 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA busy_timeout=5000;")
     return conn
 
 
@@ -32,3 +33,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for col in ("ipo_date", "out_date"):
         if col not in cols:
             conn.execute(f"ALTER TABLE dim_stock ADD COLUMN {col} TEXT")
+
+    ucols = {r["name"] for r in conn.execute("PRAGMA table_info(dim_universe)")}
+    for col, ddl in (
+        ("is_custom", "INTEGER NOT NULL DEFAULT 0"),
+        ("daily_enabled", "INTEGER NOT NULL DEFAULT 0"),
+        ("members_updated_at", "TEXT"),
+    ):
+        if col not in ucols:
+            conn.execute(f"ALTER TABLE dim_universe ADD COLUMN {col} {ddl}")
+
+    # C0 是全局流水线维护的内置池，落一行便于统一展示与读写状态。
+    conn.execute(
+        """INSERT INTO dim_universe
+               (universe_id, name, description, updated_at, is_custom, daily_enabled)
+           VALUES ('C0', 'C0 当前板块成分', '电网设备 + 天然气',
+                   datetime('now','localtime'), 0, 1)
+           ON CONFLICT(universe_id) DO NOTHING"""
+    )

@@ -11,10 +11,12 @@ from fastapi.staticfiles import StaticFiles
 
 from ..backtest.metrics import compute_metrics
 from ..storage.repository import open_repository
+from .pool_routes import router as pool_router
 
 BASE = Path(__file__).parent
 app = FastAPI(title="stock-cash-streaming", version="0.1.0")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
+app.include_router(pool_router)
 
 
 def _rows(rs) -> list[dict]:
@@ -255,7 +257,9 @@ def tracking(start_date: str | None = None, strategy: str = "defensive",
     name = base if universe == "C0" else f"{base}_{universe}"
     repo = open_repository()
     try:
-        return simulate_tracking(repo, strategy=name, start_date=start_date, persist=False)
+        # C0 保持历史基准（板块成分）；其它池用自身成员等权作为基准
+        return simulate_tracking(repo, strategy=name, start_date=start_date, persist=False,
+                                 universe_id=None if universe == "C0" else universe)
     finally:
         repo.close()
 

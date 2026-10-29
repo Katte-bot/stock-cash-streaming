@@ -689,6 +689,34 @@ python -m stock_cash_streaming.cli experiments --universe C0
 
 **仍有限制**：历史 ST 状态仍按当前名称；财务值为新浪当前可见值，未保留历史修订链（修订表从本次回填起可追溯）。
 
+### 22.16 自定义股票池与池级每日任务（2026-10-29）
+
+**产品决策**：内置 C0~C3 **只读**（名称/成员不可在页面改，仍走 CLI/CSV/YAML 刷新）；自定义池（`U1`、`U2`…）名称与成员完全可编辑；每日调度范围 = 增量数据 + 因子 + 目标组合/跟踪，**回测仅在数据日期前进或成员变更时重跑**。
+
+**数据层**：`dim_universe` 新增 `is_custom` / `daily_enabled` / `members_updated_at`（旧库自动 `ALTER TABLE` 迁移），并落 C0 行（`daily_enabled=1`，表示由全局流水线维护）。`refresh_universe` / `prune_universe` 更新 `members_updated_at`，用于判断回测是否因成员变化而失效。
+
+**业务层**：
+- `research/pool_admin.py`：代码规范化（换行/逗号/空格分隔、`zfill(6)`、去重）、名称解析（优先 `dim_stock`，缺失用腾讯快照，仍无法解析则要求手工填写）、池/成员 CRUD、状态计算（`data_state` / `backtest_state` / 今日 `task_log`）。
+- 自定义成员 `sector_code` 取 `dim_stock.industry`，无则 `"自定义"`；ST/退市标的直接拒绝入库。
+- `pipeline/pool_jobs.py`：8 步幂等激活 —— 池 → 行情/资金流 → 财务/上市日 → 因子（v2+v3）→ 回测 → 目标组合 → 跟踪 → 开启调度；每步先判断“已最新/已回测/已开启”并写明跳过原因。
+
+**并发**：`data/pool_job.lock` 的 `fcntl.flock` 跨进程锁，池任务（页面手动 + scheduler 每日）与 `run_daily_pipeline` 共用；抢不到锁返回 `busy`（API 409）/ `skipped`。SQLite 连接 `busy_timeout=5000`。
+
+**口径**：
+- 回测策略名 `defensive_top12_monthly_{pool}`；组合/跟踪 C0 仍用生产名，其它池追加 `_{pool}`。
+- 跟踪基准：非 C0 传入 `universe_id`，基准改为**该池成员等权**；C0 保持板块成分基准不变。
+- C0 的池任务只做数据/因子/回测，组合/跟踪由全局每日流水线负责（不重复跑）。
+- 因子按池计算：`compute_all(repo, symbols=...)` 只重算该池成员，避免全库 43 万行。
+
+**接口**：`/api/pools`（GET 列表 / POST 新建 / POST resolve）、`/api/pools/{id}`（GET / PATCH 改名）、`/api/pools/{id}/members`（POST 添加）、`/api/pools/{id}/members/{symbol}`（DELETE）、`/api/pools/{id}/activate`（POST，后台线程）、`/api/pools/{id}/job`（GET 轮询）、`/api/pools/{id}/schedule`（POST 开关）。内置池改名/增删成员返回 403，任务并发返回 409。
+
+**前端**：改为「左侧固定导航 + 总览页 + 池详情页」两页结构（hash 路由 `#/overview`、`#/pool/{id}`；移动端侧栏收起为抽屉）：
+- 总览页：策略说明、全局 KPI（池数/成员合计/已开启调度数/数据最新日）、股票池卡片（成员数、最新回测年化/夏普、今日信号、数据/回测/调度徽标、启动更新/成员/改名/添加/调度按钮）、AI 日报。
+- 详情页：池内 KPI + 三组可折叠分区（① 行情与信号 ② 组合与跟踪 ③ 回测与历史，第三组默认折叠），折叠展开时自动 resize 图表。
+- `/api/pools` 额外返回 `latest`、`backtest_annual`、`backtest_sharpe`、`signals_count` 供总览卡片使用。
+
+**限制**：不支持删除整个池、成员排序、权重自定义与鉴权；页面写接口只适合内网/受限安全组。
+
 
 
 

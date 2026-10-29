@@ -282,6 +282,7 @@ tail -f logs/app_$(date +%F).log
 | 时间偏 8 小时 | `sudo timedatectl set-timezone Asia/Shanghai` |
 | `database is locked` | 同时跑了两个写任务；只运行一个 `daily/recover/portfolio` |
 | 改代码页面没变 | Web 是否带 `--reload`；调度器需手动重启；浏览器硬刷新 |
+| 自定义股票池在哪 | 左侧导航「总览」→ 股票池卡片区：新建池（输入代码→解析名称→确认）、改名、增删成员、启动/更新、开关每日调度；内置 C0~C3 只读 |
 | 调度器没触发 | `tmux a -t scs` 看进程；确认时区 |
 | 920010 拉取失败 | 北交所接口不支持，属预期 |
 | 磁盘不足 | 当前库约 1.8 GB，备份同体积，建议 40 GB+ |

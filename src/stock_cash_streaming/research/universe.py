@@ -85,6 +85,7 @@ def refresh_universe(repo: Repository, universe_id: str, df: pd.DataFrame,
     repo.upsert("dim_universe", [{
         "universe_id": universe_id, "name": name or universe_id,
         "description": description, "updated_at": now,
+        "members_updated_at": now,
     }], ["universe_id"])
     # 整体替换：先删后插，保证清单删掉的股票会从池中移除
     repo.conn.execute("DELETE FROM dim_universe_member WHERE universe_id=?", (universe_id,))
@@ -225,6 +226,11 @@ def prune_universe(repo: Repository, universe_id: str, max_stale_days: int = 365
                           (now, sym))
     repo.conn.commit()
     if removed:
+        repo.conn.execute(
+            "UPDATE dim_universe SET members_updated_at=?, updated_at=? WHERE universe_id=?",
+            (now, now, universe_id),
+        )
+        repo.conn.commit()
         logger.info(f"{universe_id} 剔除 {len(removed)} 只无行情/退市标的")
     return removed
 

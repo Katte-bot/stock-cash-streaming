@@ -15,6 +15,7 @@
     --accent:#6366f1; --accent2:#22d3ee; --gold:#f59e0b;
     --up:#ef4444; --down:#10b981; --radius:16px;
     --grid:rgba(255,255,255,.05); --tipbg:rgba(13,21,38,.96); --tipbd:rgba(255,255,255,.12);
+    --side:236px;
   }
   html[data-theme="light"]{
     --bg:#f4f6fb; --panel:#ffffff; --panel2:#f1f4fa;
@@ -33,13 +34,38 @@
     color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Inter,Segoe UI,sans-serif;
     min-height:100vh; -webkit-font-smoothing:antialiased; transition:background .3s,color .3s;
   }
-  .wrap{max-width:1440px;margin:0 auto;padding:26px 28px 60px}
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:22px}
-  .brand{display:flex;align-items:center;gap:14px}
-  .logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));
-        box-shadow:0 8px 24px rgba(99,102,241,.35);position:relative}
-  .logo::after{content:"";position:absolute;inset:12px;border-radius:6px;border:2px solid rgba(255,255,255,.9);
+  /* ---------- 左侧导航 ---------- */
+  .sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--side);padding:20px 12px 16px;
+           border-right:1px solid var(--border);background:rgba(8,13,24,.72);
+           backdrop-filter:blur(10px);overflow-y:auto;z-index:40;display:flex;flex-direction:column}
+  html[data-theme="light"] .sidebar{background:rgba(255,255,255,.82)}
+  .brand{display:flex;align-items:center;gap:10px;padding:0 8px 16px}
+  .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+        box-shadow:0 8px 24px rgba(99,102,241,.35);position:relative;flex:0 0 auto}
+  .logo::after{content:"";position:absolute;inset:10px;border-radius:5px;border:2px solid rgba(255,255,255,.9);
         border-left-color:transparent;border-bottom-color:transparent;transform:rotate(45deg)}
+  .brand-txt{min-width:0}
+  .brand-txt b{display:block;font-size:14px;font-weight:650;letter-spacing:.2px}
+  .brand-txt span{display:block;font-size:11px;color:var(--faint);margin-top:2px}
+  .nav-group{margin-bottom:14px}
+  .nav-title{font-size:10.5px;color:var(--faint);letter-spacing:.8px;margin:0 0 7px 10px}
+  .nav-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;
+        text-align:left;cursor:pointer;font-family:inherit;font-size:13px;color:var(--muted);
+        background:transparent;border:1px solid transparent;padding:9px 11px;border-radius:10px;
+        margin-bottom:3px;transition:.18s}
+  .nav-item:hover{background:var(--panel);color:var(--text)}
+  .nav-item.active{background:linear-gradient(135deg,rgba(99,102,241,.24),rgba(34,211,238,.12));
+        color:var(--text);border-color:rgba(99,102,241,.35);font-weight:600}
+  .nav-item .nav-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nav-item .cnt{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums;flex:0 0 auto}
+  .side-foot{margin-top:auto;padding:12px 10px 0;border-top:1px solid var(--border);
+        font-size:11px;color:var(--faint);line-height:1.7}
+  .drawer-mask{display:none;position:fixed;inset:0;background:rgba(3,7,16,.55);z-index:39}
+  .drawer-mask.open{display:block}
+  /* ---------- 主内容区 ---------- */
+  .main{margin-left:var(--side);padding:22px 26px 60px;min-height:100vh}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  .topbar .titlebox{display:flex;align-items:center;gap:10px;min-width:0}
   h1{font-size:20px;margin:0;letter-spacing:.3px;font-weight:650}
   .sub{font-size:12.5px;color:var(--muted);margin-top:3px}
   .tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -50,8 +76,12 @@
   .btn{cursor:pointer;font-size:12px;color:var(--text);background:var(--panel);border:1px solid var(--border);
        padding:7px 13px;border-radius:999px;transition:.2s;font-family:inherit}
   .btn:hover{border-color:var(--border2);background:var(--panel2)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn.primary{background:linear-gradient(135deg,var(--accent),#4f46e5);border:none;color:#fff;font-weight:600}
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin-bottom:16px}
+  .menu-btn{display:none}
+  .page[hidden]{display:none}
+  /* ---------- 通用卡片 ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:16px}
   .kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;
        position:relative;overflow:hidden;transition:.25s}
   .kpi:hover{border-color:var(--border2);transform:translateY(-1px)}
@@ -91,7 +121,7 @@
   .g-neutral{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border2)}
   .g-avoid{background:rgba(16,185,129,.14);color:#34d399;border:1px solid rgba(16,185,129,.3)}
   .score{font-weight:680}
-  .pfbar{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 12px}
+  .pfbar{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 12px;align-items:center}
   .pfbar .pill{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--border);
                border-radius:10px;padding:8px 12px;display:inline-flex;align-items:center;gap:8px}
   .pfbar .pill b{color:var(--text);font-weight:650;font-variant-numeric:tabular-nums}
@@ -106,14 +136,61 @@
   .m{background:var(--panel2);border:1px solid var(--border);border-radius:11px;padding:11px 13px}
   .m .k{font-size:11px;color:var(--muted)}
   .m .v{font-size:18px;font-weight:650;margin-top:5px;font-variant-numeric:tabular-nums}
-  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 14px}
-  .tab{cursor:pointer;font-size:12.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--border);
-       padding:7px 14px;border-radius:999px;transition:.2s;font-family:inherit}
-  .tab:hover{border-color:var(--border2);color:var(--text)}
-  .tab.active{background:linear-gradient(135deg,var(--accent),#4f46e5);border-color:transparent;color:#fff;font-weight:600}
   .report{white-space:pre-wrap;line-height:1.85;font-size:13.2px;color:var(--text);background:var(--panel2);
           border:1px solid var(--border);border-radius:12px;padding:16px 18px;min-height:70px}
   footer{margin-top:26px;padding-top:18px;border-top:1px solid var(--border);color:var(--faint);font-size:11.5px;line-height:1.7;text-align:center}
+  /* ---------- 策略说明 ---------- */
+  .strategy{border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;
+        background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(34,211,238,.05))}
+  .strategy h2{font-size:15px;margin:0 0 4px;font-weight:650;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .strategy .desc{font-size:12px;color:var(--faint);margin:0 0 12px}
+  .slist{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 22px;
+        font-size:12.5px;color:var(--muted);line-height:1.75}
+  .slist b{color:var(--text);font-weight:600}
+  /* ---------- 股票池卡片 ---------- */
+  .pool-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
+  .pcard{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+        padding:16px 16px 12px;cursor:pointer;transition:.2s}
+  .pcard:hover{border-color:var(--border2);transform:translateY(-2px);box-shadow:0 12px 32px rgba(0,0,0,.2)}
+  .pcard-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .pcard-name{font-size:15px;font-weight:650}
+  .pcard-sub{font-size:11.5px;color:var(--faint);margin-top:3px}
+  .pcard-go{color:var(--faint);font-size:14px;flex:0 0 auto}
+  .pcard-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 12px}
+  .pcard-metrics .k{font-size:10.5px;color:var(--muted)}
+  .pcard-metrics .v{font-size:16px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}
+  .pool-status{display:flex;gap:6px;flex-wrap:wrap}
+  .pcard-ops{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;border-top:1px solid var(--border);padding-top:10px}
+  .pcard-ops .icon-btn{margin:0}
+  /* ---------- 分区折叠 ---------- */
+  .sec{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden}
+  .sec-head{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;
+        padding:12px 16px;background:var(--panel);font-size:13.5px;font-weight:620;user-select:none}
+  .sec-head:hover{background:var(--panel2)}
+  .sec-head .meta{font-size:11.5px;color:var(--faint);font-weight:400;margin-left:auto}
+  .sec-head .chev{color:var(--faint);transition:transform .2s;flex:0 0 auto}
+  .sec.collapsed .chev{transform:rotate(-90deg)}
+  .sec-body{padding:14px 14px 0}
+  .sec.collapsed .sec-body{display:none}
+  .sec-body .card:last-child{margin-bottom:14px}
+  /* ---------- 股票池管理表单 ---------- */
+  .form-row{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+  .field{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+  .input,.textarea{font-family:inherit;font-size:13px;color:var(--text);background:var(--panel2);
+        border:1px solid var(--border);border-radius:10px;padding:9px 11px;outline:none;width:100%;transition:.2s}
+  .input:focus,.textarea:focus{border-color:var(--accent)}
+  .textarea{resize:vertical;min-height:64px}
+  .badge-ok{font-size:11px;padding:3px 8px;border-radius:999px;white-space:nowrap;
+        background:rgba(16,185,129,.14);color:#34d399;border:1px solid rgba(16,185,129,.3)}
+  .badge-warn{font-size:11px;padding:3px 8px;border-radius:999px;white-space:nowrap;
+        background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3)}
+  .badge-off{font-size:11px;padding:3px 8px;border-radius:999px;white-space:nowrap;
+        background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border2)}
+  .icon-btn{cursor:pointer;font-size:11.5px;color:var(--muted);background:transparent;
+        border:1px solid var(--border);padding:5px 9px;border-radius:8px;margin:2px 4px 2px 0;
+        font-family:inherit;transition:.2s;white-space:nowrap}
+  .icon-btn:hover{color:var(--text);border-color:var(--border2);background:var(--panel2)}
+  .icon-btn:disabled{opacity:.45;cursor:not-allowed}
   /* modal */
   .modal{position:fixed;inset:0;background:rgba(3,7,16,.62);backdrop-filter:blur(4px);display:none;
          align-items:center;justify-content:center;z-index:50;padding:20px}
@@ -128,11 +205,15 @@
   /* ---------- 表格滚动容器 ---------- */
   .table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
   /* ---------- 移动端适配 ---------- */
+  @media(max-width:960px){
+    .sidebar{transform:translateX(-100%);transition:transform .25s ease;width:266px;
+             box-shadow:0 20px 60px rgba(0,0,0,.45)}
+    .sidebar.open{transform:none}
+    .main{margin-left:0;padding:14px 12px calc(36px + env(safe-area-inset-bottom))}
+    .menu-btn{display:inline-flex}
+  }
   @media(max-width:700px){
-    .wrap{padding:14px 12px calc(36px + env(safe-area-inset-bottom))}
     .topbar{gap:12px;margin-bottom:16px}
-    .brand{gap:10px}
-    .logo{width:36px;height:36px;border-radius:10px}
     h1{font-size:17px}
     .sub{font-size:11.5px}
     .tools{width:100%;gap:6px}
@@ -162,6 +243,12 @@
     .modal .chart{height:200px}
     .modal-box{padding:16px 13px;border-radius:14px;max-height:92vh}
     footer{margin-top:20px}
+    .pool-cards{grid-template-columns:1fr}
+    .pcard-metrics{grid-template-columns:repeat(2,1fr)}
+    .sec-body{padding:12px 8px 0}
+    .sec-head{padding:11px 12px;font-size:12.5px}
+    .strategy{padding:14px}
+    .slist{grid-template-columns:1fr;font-size:12px}
   }
   @media(max-width:480px){
     /* 窄屏隐藏次要列，关键信息优先 */
@@ -176,13 +263,40 @@
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="topbar">
-    <div class="brand">
-      <div class="logo"></div>
+
+<aside class="sidebar" id="sidebar">
+  <div class="brand">
+    <div class="logo"></div>
+    <div class="brand-txt">
+      <b>量化研究台</b>
+      <span>防御型组合 · 低波动</span>
+    </div>
+  </div>
+  <nav>
+    <div class="nav-group">
+      <div class="nav-title">概览</div>
+      <button class="nav-item" data-nav="overview" id="navOverview">总览 · 策略与股票池</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">股票池</div>
+      <div id="navPools"></div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">操作</div>
+      <button class="nav-item" data-nav="action" id="navNewPool">＋ 新建股票池</button>
+    </div>
+  </nav>
+  <div class="side-foot">数据截止 <b id="sideAsOf">--</b><br/>仅供研究，不构成投资建议</div>
+</aside>
+<div class="drawer-mask" id="drawerMask"></div>
+
+<main class="main">
+  <header class="topbar">
+    <div class="titlebox">
+      <button class="btn menu-btn" id="menuBtn">☰</button>
       <div>
-        <h1>防御型组合 · 板块横向对比</h1>
-        <div class="sub">电网设备 / 天然气 · 低波动 / 低换手 / 非流动性溢价</div>
+        <h1 id="pageTitle">总览</h1>
+        <div class="sub" id="pageSub">策略说明 · 全部股票池</div>
       </div>
     </div>
     <div class="tools">
@@ -190,123 +304,195 @@
       <span class="badge">数据截止 <b id="asOf">--</b></span>
       <button class="btn" id="themeBtn">☀ 浅色</button>
     </div>
-  </div>
+  </header>
 
-  <div class="tabs" id="poolTabs" style="margin:0 0 14px"></div>
+  <!-- ==================== 总览页 ==================== -->
+  <section class="page" id="pageOverview">
+    <div class="strategy">
+      <h2>策略说明 <span class="tag">防御型 · 月频 · top12</span></h2>
+      <p class="desc">本系统的选股与组合逻辑（客观规则，不构成投资建议）</p>
+      <div class="slist">
+        <div>· <b>评分</b>：8 个技术/流动性因子加权排名（低波动、低换手、低成交额、低彩票特征、弱动量、布林低位、非流动性溢价）。</div>
+        <div>· <b>组合</b>：Top12，1/波动加权，25% 波动率目标；篮子波动超目标自动降仓（下限 30%）。</div>
+        <div>· <b>调仓</b>：月频（20 个交易日），持仓缓冲 1 名；信号 t 日收盘计算、t+1 日收盘执行，天然满足 T+1。</div>
+        <div>· <b>成本</b>：佣金 0.025% + 过户费 0.001% + 印花税（卖出）+ 滑点；分板块涨跌停不可买/不可卖。</div>
+        <div>· <b>剔除</b>：ST/*ST/退市、连续停牌 ≥60 个交易日、上市不足 60 个交易日。</div>
+        <div>· <b>股票池</b>：C0 当前板块成分为全局流水线维护；C1~C3 内置只读；自定义池可改名与增删成员。</div>
+      </div>
+    </div>
 
-  <div class="kpis">
-    <div class="kpi"><div class="lab">覆盖个股</div><div class="val" id="kStocks">--</div><div class="hint" id="kStocksHint">两大目标板块</div></div>
-    <div class="kpi"><div class="lab">今日信号</div><div class="val" id="kSignals">--</div><div class="hint">板块内综合评分产出</div></div>
-    <div class="kpi"><div class="lab">最新回测年化</div><div class="val" id="kAnnual">--</div><div class="hint" id="kAnnualHint">--</div></div>
-    <div class="kpi"><div class="lab">夏普比率</div><div class="val" id="kSharpe">--</div><div class="hint">2018 至今</div></div>
-  </div>
+    <div class="kpis">
+      <div class="kpi"><div class="lab">股票池</div><div class="val" id="ovPools">--</div><div class="hint" id="ovPoolsHint">内置 / 自定义</div></div>
+      <div class="kpi"><div class="lab">池成员合计</div><div class="val" id="ovMembers">--</div><div class="hint">含跨池重复标的</div></div>
+      <div class="kpi"><div class="lab">已开启每日调度</div><div class="val" id="ovScheduled">--</div><div class="hint">每日增量 + 组合/跟踪</div></div>
+      <div class="kpi"><div class="lab">数据最新日</div><div class="val" id="ovAsOf">--</div><div class="hint">全部池行情截止</div></div>
+    </div>
 
-  <div class="grid2">
     <div class="card">
-      <h2><span id="secTitle">板块资金流</span> <span class="tag" id="secTag">同花顺 · 即时</span></h2>
-      <p class="desc" id="secDesc">板块层面主力净流入（亿元）</p>
-      <div class="sector-row" id="sectorCards"></div>
-      <div class="chart sm" id="sectorFlowChart"></div>
+      <h2>股票池 <span class="tag">点击卡片进入详情</span></h2>
+      <p class="desc">成员数、最新回测年化、夏普、今日信号；也可在此启动更新、维护成员与调度</p>
+      <div class="pfbar">
+        <button class="btn primary" id="newPoolBtn">+ 新建股票池</button>
+        <span class="reasons" id="poolAdminMsg"></span>
+      </div>
+      <div class="pool-cards" id="poolCards"></div>
+      <div class="report" id="poolJobBox" style="display:none;margin-top:14px"></div>
     </div>
+
     <div class="card">
-      <h2>个股主力净流入 <span class="tag" id="flowTag">腾讯快照</span></h2>
-      <p class="desc">池内横向对比（亿元），红正绿负</p>
-      <div class="chart sm" id="stockFlowChart"></div>
+      <h2>AI 日报 <span class="tag" id="reportSource">DeepSeek</span></h2>
+      <p class="desc">基于当日板块资金流与信号自动生成（规则模板降级）</p>
+      <button class="btn primary" id="reportBtn">生成日报</button>
+      <div style="height:12px"></div>
+      <div class="report" id="reportBox">点击上方按钮生成今日日报。</div>
     </div>
-  </div>
+  </section>
 
-  <div class="card">
-    <h2>池内横向对比 <span class="tag" id="stockTag">点击行查看个股详情</span></h2>
-    <p class="desc">最新交易日主力净额、收盘价与涨跌幅</p>
-    <div class="table-wrap">
-    <table class="tbl-stock">
-      <thead><tr><th>板块</th><th>股票</th><th class="num">主力净额</th><th class="num">收盘价</th><th class="num">涨跌幅</th></tr></thead>
-      <tbody id="stockTable"></tbody>
-    </table>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>因子热力图 <span class="tag">最新截面 · Z-Score</span></h2>
-    <p class="desc">红=因子值高，绿=因子值低</p>
-    <div class="chart" id="heatmapChart"></div>
-  </div>
-
-  <div class="card">
-    <h2>综合信号 <span class="tag">板块内评分</span></h2>
-    <p class="desc">防御型评分：低波动 / 低换手 / 低彩票特征 / 非流动性溢价，0–100 分</p>
-    <div class="table-wrap">
-    <table class="tbl-signal">
-      <thead><tr><th>板块</th><th>股票</th><th class="num">评分</th><th>分级</th><th>触发理由</th></tr></thead>
-      <tbody id="signalTable"></tbody>
-    </table>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>当前目标组合 <span class="tag" id="pfTag">防御型 · top12</span></h2>
-    <p class="desc">与回测同口径：低波动 / 低换手 / 低彩票特征 / 非流动性溢价；信号日次一交易日收盘执行</p>
+  <!-- ==================== 股票池详情页 ==================== -->
+  <section class="page" id="pagePool" hidden>
     <div class="pfbar">
-      <span class="pill" id="pfAction">--</span>
-      <span class="pill" id="pfExposure">总仓位 <b>--</b></span>
-      <span class="pill" id="pfVol">篮子波动 <b>--</b></span>
+      <div style="min-width:0">
+        <div style="font-size:15px;font-weight:650" id="poolTitle">--</div>
+        <div class="sub" id="poolSub">--</div>
+      </div>
+      <div style="flex:1"></div>
+      <div id="poolOps" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
-    <div class="table-wrap">
-    <table class="tbl-pf">
-      <thead><tr><th>#</th><th>股票</th><th>板块</th><th class="num">综合分</th><th class="num">波动</th><th class="num">目标权重</th><th>备注</th></tr></thead>
-      <tbody id="pfTable"></tbody>
-    </table>
+    <div class="reasons" id="poolOpsMsg" style="margin:-4px 0 12px"></div>
+    <div class="report" id="poolJobBoxDetail" style="display:none;margin-bottom:14px"></div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="lab">覆盖个股</div><div class="val" id="kStocks">--</div><div class="hint" id="kStocksHint">池成员</div></div>
+      <div class="kpi"><div class="lab">今日信号</div><div class="val" id="kSignals">--</div><div class="hint">池内综合评分产出</div></div>
+      <div class="kpi"><div class="lab">最新回测年化</div><div class="val" id="kAnnual">--</div><div class="hint" id="kAnnualHint">--</div></div>
+      <div class="kpi"><div class="lab">夏普比率</div><div class="val" id="kSharpe">--</div><div class="hint">2018 至今</div></div>
     </div>
-    <div class="pfdiff" id="pfDiff"></div>
-  </div>
 
-  <div class="card">
-    <h2>模拟跟踪 <span class="tag" id="trTag">实盘跟踪 · 自建仓日起</span></h2>
-    <p class="desc">按调仓快照与真实收盘价计算；信号日次一交易日收盘执行，含单边 0.13% 成本</p>
-    <div class="pfbar">
-      <span class="pill" id="trStatus">--</span>
-      <span class="pill" id="trDays">交易日 <b>--</b></span>
-      <span class="pill" id="trExcess">年化超额 <b>--</b></span>
+    <div class="sec" id="secMarket">
+      <div class="sec-head" onclick="toggleSec('secMarket')">
+        <span>① 行情与信号</span>
+        <span class="meta">资金流 · 横向对比 · 热力图 · 评分</span>
+        <span class="chev">▾</span>
+      </div>
+      <div class="sec-body">
+        <div class="grid2">
+          <div class="card">
+            <h2><span id="secTitle">板块资金流</span> <span class="tag" id="secTag">同花顺 · 即时</span></h2>
+            <p class="desc" id="secDesc">板块层面主力净流入（亿元）</p>
+            <div class="sector-row" id="sectorCards"></div>
+            <div class="chart sm" id="sectorFlowChart"></div>
+          </div>
+          <div class="card">
+            <h2>个股主力净流入 <span class="tag" id="flowTag">腾讯快照</span></h2>
+            <p class="desc">池内横向对比（亿元），红正绿负</p>
+            <div class="chart sm" id="stockFlowChart"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>池内横向对比 <span class="tag" id="stockTag">点击行查看个股详情</span></h2>
+          <p class="desc">最新交易日主力净额、收盘价与涨跌幅</p>
+          <div class="table-wrap">
+            <table class="tbl-stock">
+              <thead><tr><th>板块</th><th>股票</th><th class="num">主力净额</th><th class="num">收盘价</th><th class="num">涨跌幅</th></tr></thead>
+              <tbody id="stockTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>因子热力图 <span class="tag">最新截面 · Z-Score</span></h2>
+          <p class="desc">红=因子值高，绿=因子值低</p>
+          <div class="chart" id="heatmapChart"></div>
+        </div>
+
+        <div class="card">
+          <h2>综合信号 <span class="tag">池内评分</span></h2>
+          <p class="desc">防御型评分：低波动 / 低换手 / 低彩票特征 / 非流动性溢价，0–100 分</p>
+          <div class="table-wrap">
+            <table class="tbl-signal">
+              <thead><tr><th>板块</th><th>股票</th><th class="num">评分</th><th>分级</th><th>触发理由</th></tr></thead>
+              <tbody id="signalTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="mgrid" id="trMetrics"></div>
-    <div class="chart" id="trChart"></div>
-    <div class="pfdiff" id="trNote"></div>
-  </div>
 
-  <div class="card">
-    <h2>股票池年度表现 <span class="tag" id="univTag">--</span></h2>
-    <p class="desc">真实成本（佣金 0.025% + 过户费 0.001% + 印花税 + 滑点）、分板块涨跌停；月频调仓（非年初买入年底卖出）；年度收益按自然年切分日频净值</p>
-    <div class="tabs" id="univTabs"></div>
-    <div class="mgrid" id="univMetrics"></div>
-    <div class="chart" id="univYearChart"></div>
-    <div class="table-wrap">
-      <table>
-        <thead id="univHead"></thead>
-        <tbody id="univBody"></tbody>
-      </table>
+    <div class="sec" id="secPortfolio">
+      <div class="sec-head" onclick="toggleSec('secPortfolio')">
+        <span>② 组合与跟踪</span>
+        <span class="meta">目标权重 · 调仓清单 · 模拟净值</span>
+        <span class="chev">▾</span>
+      </div>
+      <div class="sec-body">
+        <div class="card">
+          <h2>当前目标组合 <span class="tag" id="pfTag">防御型 · top12</span></h2>
+          <p class="desc">与回测同口径：低波动 / 低换手 / 低彩票特征 / 非流动性溢价；信号日次一交易日收盘执行</p>
+          <div class="pfbar">
+            <span class="pill" id="pfAction">--</span>
+            <span class="pill" id="pfExposure">总仓位 <b>--</b></span>
+            <span class="pill" id="pfVol">篮子波动 <b>--</b></span>
+          </div>
+          <div class="table-wrap">
+            <table class="tbl-pf">
+              <thead><tr><th>#</th><th>股票</th><th>板块</th><th class="num">综合分</th><th class="num">波动</th><th class="num">目标权重</th><th>备注</th></tr></thead>
+              <tbody id="pfTable"></tbody>
+            </table>
+          </div>
+          <div class="pfdiff" id="pfDiff"></div>
+        </div>
+
+        <div class="card">
+          <h2>模拟跟踪 <span class="tag" id="trTag">实盘跟踪 · 自建仓日起</span></h2>
+          <p class="desc">按调仓快照与真实收盘价计算；信号日次一交易日收盘执行，含单边 0.13% 成本；基准为该池等权</p>
+          <div class="pfbar">
+            <span class="pill" id="trStatus">--</span>
+            <span class="pill" id="trDays">交易日 <b>--</b></span>
+            <span class="pill" id="trExcess">年化超额 <b>--</b></span>
+          </div>
+          <div class="mgrid" id="trMetrics"></div>
+          <div class="chart" id="trChart"></div>
+          <div class="pfdiff" id="trNote"></div>
+        </div>
+      </div>
     </div>
-  </div>
 
-  <div class="card">
-    <h2>策略回测 <span class="tag" id="btRange">--</span></h2>
-    <p class="desc">防御型评分 · 月频 top12 · 1/波动加权 · 25% 波动率目标 · 含 T+1/涨跌停/交易成本；基准 = 等权买入持有（不计费）</p>
-    <div class="mgrid" id="btMetrics"></div>
-    <div class="chart" id="navChart"></div>
-  </div>
+    <div class="sec collapsed" id="secHistory">
+      <div class="sec-head" onclick="toggleSec('secHistory')">
+        <span>③ 回测与历史</span>
+        <span class="meta">策略回测 · 分年度表现</span>
+        <span class="chev">▾</span>
+      </div>
+      <div class="sec-body">
+        <div class="card">
+          <h2>策略回测 <span class="tag" id="btRange">--</span></h2>
+          <p class="desc">防御型评分 · 月频 top12 · 1/波动加权 · 25% 波动率目标 · 含 T+1/涨跌停/交易成本；基准 = 该池等权买入持有（不计费）</p>
+          <div class="mgrid" id="btMetrics"></div>
+          <div class="chart" id="navChart"></div>
+        </div>
 
-  <div class="card">
-    <h2>AI 日报 <span class="tag" id="reportSource">DeepSeek</span></h2>
-    <p class="desc">基于当日板块资金流与信号自动生成（规则模板降级）</p>
-    <button class="btn primary" id="reportBtn">生成日报</button>
-    <div style="height:12px"></div>
-    <div class="report" id="reportBox">点击上方按钮生成今日日报。</div>
-  </div>
+        <div class="card">
+          <h2>分年度表现 <span class="tag" id="univTag">--</span></h2>
+          <p class="desc">真实成本（佣金 0.025% + 过户费 0.001% + 印花税 + 滑点）、分板块涨跌停；月频调仓；年度收益按自然年切分日频净值</p>
+          <div class="mgrid" id="univMetrics"></div>
+          <div class="chart" id="univYearChart"></div>
+          <div class="table-wrap">
+            <table>
+              <thead id="univHead"></thead>
+              <tbody id="univBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <footer>
     本系统输出均为基于历史数据的量化研究结果，不构成任何投资建议。股市有风险，入市需谨慎。<br/>
     数据来源：腾讯（行情/快照）、新浪（板块成分/个股资金流）、同花顺（板块资金流）。
   </footer>
-</div>
+</main>
 
 <div class="modal" id="modal">
   <div class="modal-box">
@@ -319,6 +505,57 @@
   </div>
 </div>
 
+<div class="modal" id="poolModal">
+  <div class="modal-box" style="width:min(760px,100%)">
+    <div class="modal-head">
+      <h3 id="poolModalTitle">新建股票池</h3>
+      <div class="close" id="poolModalClose">×</div>
+    </div>
+    <div class="form-row" id="poolNameRow">
+      <label class="field">股票池名称
+        <input class="input" id="poolNameInput" maxlength="40" placeholder="如：低波动核心" />
+      </label>
+    </div>
+    <div id="poolCodeRow">
+      <div class="form-row">
+        <label class="field">股票代码（换行 / 逗号 / 空格分隔）
+          <textarea class="textarea" id="poolCodesInput" rows="3" placeholder="600406 000001 159611"></textarea>
+        </label>
+      </div>
+      <div style="margin:0 0 12px">
+        <button class="btn" id="poolResolveBtn">解析名称</button>
+        <span class="reasons" id="poolResolveMsg"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>代码</th><th>名称</th><th>市场</th><th>ETF</th><th>状态</th></tr></thead>
+          <tbody id="poolResolveBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" id="poolModalCancel">取消</button>
+      <button class="btn primary" id="poolModalSubmit">确认创建</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="memberModal">
+  <div class="modal-box" style="width:min(760px,100%)">
+    <div class="modal-head">
+      <h3 id="memberModalTitle">成员管理</h3>
+      <div class="close" id="memberModalClose">×</div>
+    </div>
+    <div class="reasons" id="memberModalHint" style="margin-bottom:10px"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th>板块</th><th>来源</th><th>更新时间</th><th>操作</th></tr></thead>
+        <tbody id="memberModalBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const fmtYi = v => (v === null || v === undefined || isNaN(v)) ? '--' : (v / 1e8).toFixed(2) + ' 亿';
@@ -326,9 +563,10 @@ const fmtPct = v => (v === null || v === undefined || isNaN(v)) ? '--' : (v > 0 
 const cls = v => v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
 const gradeCls = g => g === '强烈关注' ? 'g-strong' : g === '关注' ? 'g-watch' : g === '回避' ? 'g-avoid' : 'g-neutral';
 const charts = {};
-const state = { data: null, intraday: null, universe: 'C0' };
-const univState = { data: null, active: 'C0' };
-const POOLS = ['C0', 'C1', 'C2', 'C3'];
+const state = { data: null, intraday: null, universe: 'C0', view: 'overview' };
+const univState = { data: null };
+const poolsState = { list: [], jobTimer: null };
+const poolModalState = { mode: 'create', poolId: null, items: [] };
 
 function theme(){ return document.documentElement.dataset.theme || 'dark'; }
 function C(){
@@ -345,13 +583,196 @@ function chart(id){
   if (!charts[id]) charts[id] = echarts.init($(id), null, {renderer:'canvas'});
   return charts[id];
 }
+function resizeCharts(){
+  Object.entries(charts).forEach(([id, c]) => {
+    const el = $(id);
+    if (el && el.offsetParent !== null) c.resize();
+  });
+}
+
+/* ---------- 视图切换（左侧导航 + hash 路由） ---------- */
+function poolOf(id){ return (poolsState.list || []).find(p => p.id === id) || null; }
+function poolLabel(id){
+  const p = poolOf(id);
+  return p ? (p.is_custom ? p.name : p.id) : id;
+}
+function parseHash(){
+  const h = (location.hash || '').replace(/^#\/?/, '');
+  if (h.startsWith('pool/')) return {view:'pool', pool: decodeURIComponent(h.slice(5))};
+  return {view:'overview', pool: state.universe};
+}
+function goOverview(){ location.hash = '#/overview'; }
+function goPool(id){ location.hash = '#/pool/' + encodeURIComponent(id); }
+
+function setActiveNav(){
+  document.querySelectorAll('.nav-item').forEach(b => {
+    if (!b.dataset.nav || b.dataset.nav === 'action'){ b.classList.remove('active'); return; }
+    const on = b.dataset.nav === 'overview'
+      ? state.view === 'overview'
+      : (state.view === 'pool' && b.dataset.pool === state.universe);
+    b.classList.toggle('active', on);
+  });
+}
+
+function applyView(){
+  const p = parseHash();
+  state.view = p.view;
+  if (p.view === 'pool') state.universe = p.pool || 'C0';
+  const isPool = state.view === 'pool';
+  $('pageOverview').hidden = isPool;
+  $('pagePool').hidden = !isPool;
+  $('pageTitle').textContent = isPool ? poolLabel(state.universe) : '总览';
+  $('pageSub').textContent = isPool
+    ? `${state.universe} · 池详情 · 成员 ${(poolOf(state.universe) || {}).members_count ?? '--'} 只`
+    : '策略说明 · 全部股票池 · 今日概况';
+  setActiveNav();
+  closeDrawer();
+  window.scrollTo({top:0});
+  if (isPool){
+    renderPoolHeader();
+    load();
+    loadUniverses();
+  } else {
+    renderOverviewNumbers();
+    renderPoolCards();
+    loadUniverses();
+  }
+  setTimeout(resizeCharts, 120);
+}
+
+function toggleSec(id){
+  const el = $(id);
+  el.classList.toggle('collapsed');
+  if (!el.classList.contains('collapsed')) setTimeout(resizeCharts, 60);
+}
+
+/* ---------- 总览 ---------- */
+function renderOverviewNumbers(){
+  const list = poolsState.list || [];
+  const custom = list.filter(p => p.is_custom).length;
+  $('ovPools').textContent = list.length || '--';
+  $('ovPoolsHint').textContent = `内置 ${list.length - custom} · 自定义 ${custom}`;
+  $('ovMembers').textContent = list.reduce((a, p) => a + (p.members_count || 0), 0);
+  $('ovScheduled').textContent = list.filter(p => p.schedule_enabled).length;
+  $('ovAsOf').textContent = $('asOf').textContent;
+}
+
+function dataBadge(p){
+  if (p.data_state === 'latest') return `<span class="badge-ok">数据 ${p.data_as_of || ''}</span>`;
+  if (p.data_state === 'stale')
+    return `<span class="badge-warn">数据落后 ${(p.stale_count || 0) + (p.missing_count || 0)} 只</span>`;
+  return `<span class="badge-warn">无数据</span>`;
+}
+function btBadge(p){
+  if (p.backtest_state === 'latest') return `<span class="badge-ok">已回测至 ${p.backtest_end || ''}</span>`;
+  if (p.backtest_state === 'stale') return '<span class="badge-warn">回测需更新</span>';
+  return '<span class="badge-off">未回测</span>';
+}
+function scheduleBadge(p){
+  if (p.id === 'C0') return '<span class="badge-off">全局每日</span>';
+  return p.schedule_enabled
+    ? '<span class="badge-ok">每日调度已开启</span>'
+    : '<span class="badge-off">未开启调度</span>';
+}
+
+function renderPoolCards(){
+  const list = poolsState.list || [];
+  $('poolCards').innerHTML = list.map(p => {
+    const running = !!(p.job && p.job.status === 'running');
+    const annual = p.backtest_annual == null ? '--' : fmtPct(p.backtest_annual * 100);
+    const annualCls = p.backtest_annual == null ? '' : cls(p.backtest_annual);
+    const sharpe = p.backtest_sharpe == null ? '--' : Number(p.backtest_sharpe).toFixed(2);
+    const sig = p.signals_count == null ? '--' : p.signals_count;
+    const ops = [
+      `<button class="icon-btn" onclick="event.stopPropagation();activatePool('${p.id}')" ${running ? 'disabled' : ''}>`
+        + `${running ? '运行中…' : '启动/更新'}</button>`,
+      `<button class="icon-btn" onclick="event.stopPropagation();openMemberModal('${p.id}')">成员</button>`,
+    ];
+    if (p.is_custom){
+      ops.push(`<button class="icon-btn" onclick="event.stopPropagation();openPoolModal('rename','${p.id}')">改名</button>`);
+      ops.push(`<button class="icon-btn" onclick="event.stopPropagation();openPoolModal('add','${p.id}')">添加股票</button>`);
+      ops.push(`<button class="icon-btn" onclick="event.stopPropagation();toggleSchedule('${p.id}', ${p.schedule_enabled ? 'false' : 'true'})">`
+        + `${p.schedule_enabled ? '关闭调度' : '开启调度'}</button>`);
+    }
+    return `<div class="pcard" onclick="goPool('${p.id}')">
+      <div class="pcard-head">
+        <div>
+          <div class="pcard-name">${p.is_custom ? p.name : p.id}</div>
+          <div class="pcard-sub">${p.is_custom ? p.id + ' · 自定义池' : '内置池'}</div>
+        </div>
+        <span class="pcard-go">→</span>
+      </div>
+      <div class="pcard-metrics">
+        <div><div class="k">成员</div><div class="v">${p.members_count ?? '--'}</div></div>
+        <div><div class="k">最新年化</div><div class="v ${annualCls}">${annual}</div></div>
+        <div><div class="k">夏普</div><div class="v">${sharpe}</div></div>
+        <div><div class="k">今日信号</div><div class="v">${sig}</div></div>
+      </div>
+      <div class="pool-status">${dataBadge(p)}${btBadge(p)}${scheduleBadge(p)}</div>
+      <div class="pcard-ops">${ops.join('')}</div>
+    </div>`;
+  }).join('') || '<div class="empty">暂无股票池，点击“新建股票池”开始</div>';
+}
+
+function renderPoolHeader(){
+  const id = state.universe;
+  const p = poolOf(id);
+  $('poolTitle').textContent = p ? (p.is_custom ? p.name : p.id) : id;
+  $('poolSub').textContent = p
+    ? `${p.id} · ${p.members_count} 只 · ${p.is_custom ? '自定义池（可编辑）' : '内置池（只读）'}`
+    : id;
+  const running = !!(p && p.job && p.job.status === 'running');
+  const ops = [
+    `<button class="btn primary" onclick="activatePool('${id}')" ${running ? 'disabled' : ''}>`
+      + `${running ? '运行中…' : '启动/更新'}</button>`,
+    `<button class="btn" onclick="openMemberModal('${id}')">成员管理</button>`,
+  ];
+  if (p && p.is_custom){
+    ops.push(`<button class="btn" onclick="openPoolModal('rename','${id}')">改名</button>`);
+    ops.push(`<button class="btn" onclick="openPoolModal('add','${id}')">添加股票</button>`);
+    ops.push(`<button class="btn" onclick="toggleSchedule('${id}', ${p.schedule_enabled ? 'false' : 'true'})">`
+      + `${p.schedule_enabled ? '关闭调度' : '开启调度'}</button>`);
+  }
+  $('poolOps').innerHTML = ops.join('');
+}
+
+function renderNavPools(){
+  const list = poolsState.list || [];
+  $('navPools').innerHTML = list.map(p => `
+    <button class="nav-item" data-nav="pool" data-pool="${p.id}" onclick="goPool('${p.id}')" title="${p.id}">
+      <span class="nav-label">${p.is_custom ? p.name : p.id}</span>
+      <span class="cnt">${p.members_count ?? ''}</span>
+    </button>`).join('') || '<div class="reasons" style="padding:6px 10px">暂无</div>';
+  setActiveNav();
+}
+
+/* ---------- 数据加载 ---------- */
+async function loadPools(){
+  try{
+    const r = await fetch('/api/pools', {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    poolsState.list = d.pools || [];
+    if (d.latest){
+      $('asOf').textContent = d.latest;
+      $('sideAsOf').textContent = d.latest;
+    }
+  }catch(e){
+    poolsState.list = [];
+  }
+  renderNavPools();
+  renderOverviewNumbers();
+  renderPoolCards();
+  if (state.view === 'pool') renderPoolHeader();
+}
 
 function render(d){
   state.data = d;
   const pool = d.universe || state.universe;
   $('asOf').textContent = d.as_of || '--';
+  $('sideAsOf').textContent = d.as_of || '--';
   $('kStocks').textContent = d.status?.stocks ?? '--';
-  $('kStocksHint').textContent = `${pool} 池成员`;
+  $('kStocksHint').textContent = `${poolLabel(pool)} 池成员`;
   $('kSignals').textContent = (d.signals || []).length;
   $('secTitle').textContent = pool === 'C0' ? '板块资金流' : '池内行业资金流';
   $('secTag').textContent = pool === 'C0' ? '同花顺 · 即时' : `${pool} · 汇总`;
@@ -388,7 +809,6 @@ function render(d){
 function renderStocks(){
   const stocks = (state.data?.stocks || []).filter(x => x.main_net !== null && x.main_net !== undefined);
   if (stocks.length){
-    // 仅展示主力净流入绝对值前 N（手机 12 只，桌面 20 只），避免标签拥挤
     const limit = window.innerWidth <= 700 ? 12 : 20;
     const top = [...stocks].sort((a,b)=>Math.abs(b.main_net)-Math.abs(a.main_net)).slice(0,limit)
                         .sort((a,b)=>a.main_net-b.main_net);
@@ -425,59 +845,34 @@ function renderSignals(signals){
     </tr>`).join('') || '<tr><td colspan="5" class="empty">暂无信号</td></tr>';
 }
 
-function renderPoolTabs(){
-  const counts = {};
-  (univState.data?.universes || []).forEach(u => { counts[u.id] = u.members; });
-  $('poolTabs').innerHTML = POOLS.map(id =>
-    `<button class="tab ${id === state.universe ? 'active' : ''}" data-pool="${id}">`
-    + `${id}${counts[id] ? ' · ' + counts[id] + ' 只' : ''}</button>`).join('');
-  $('poolTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => setPool(b.dataset.pool));
-}
-
-function setPool(id){
-  if (state.universe === id) return;
-  state.universe = id;
-  renderPoolTabs();
-  if (univState.data){
-    univState.active = id;
-    renderUnivTabs();
-  }
-  load();
-}
-
 async function loadUniverses(){
   try{
     const r = await fetch('/api/universes', {cache:'no-store'});
     if (!r.ok) throw new Error('HTTP ' + r.status);
     univState.data = await r.json();
-    const list = univState.data.universes || [];
-    if (!list.length){
-      $('univTabs').innerHTML = '<div class="empty">暂无股票池回测数据</div>';
-      return;
-    }
-    if (!list.some(u => u.id === univState.active)) univState.active = list[0].id;
-    renderPoolTabs();
-    renderUnivTabs();
+    if (state.view === 'pool') renderUnivDetail();
   }catch(e){
-    $('univTag').textContent = '加载失败';
-    $('univTabs').innerHTML = `<div class="empty">${e.message}</div>`;
+    if (state.view === 'pool'){
+      $('univTag').textContent = '加载失败';
+      $('univBody').innerHTML = `<tr><td class="empty">${e.message}</td></tr>`;
+    }
   }
-}
-
-function renderUnivTabs(){
-  const d = univState.data;
-  $('univTabs').innerHTML = d.universes.map(u =>
-    `<button class="tab ${u.id === univState.active ? 'active' : ''}" data-uid="${u.id}">`
-    + `${u.id}${u.members ? ' · ' + u.members + ' 只' : ''}</button>`).join('');
-  $('univTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => setPool(b.dataset.uid));
-  renderUnivDetail();
 }
 
 function renderUnivDetail(){
   const d = univState.data;
-  const u = d.universes.find(x => x.id === univState.active);
-  if (!u) return;
+  if (!d) return;
+  const id = state.universe;
   const ys = d.years || [];
+  const u = (d.universes || []).find(x => x.id === id);
+  if (!u){
+    $('univTag').textContent = id;
+    $('univMetrics').innerHTML = '';
+    $('univHead').innerHTML = '';
+    $('univBody').innerHTML = '<tr><td class="empty">自定义池暂无分年度回测数据，请查看上方“策略回测”</td></tr>';
+    if (charts['univYearChart']) charts['univYearChart'].clear();
+    return;
+  }
   $('univTag').textContent = `${u.id}${u.members ? ' · ' + u.members + ' 只' : ''}`
     + (ys.length ? ` · ${ys[0]}-${ys[ys.length - 1]}` : '');
 
@@ -625,8 +1020,8 @@ function renderPortfolio(p){
     html = '首次建档，暂无调仓对比。';
   } else {
     const nm = x => x.name || x.symbol;
-    const tip = p.action === 'hold' ? '预计下次调仓变化（今日不调仓）' : '本次调仓变化';
-    html += `<div style="color:var(--faint)">${tip}</div>`;
+    const tipTxt = p.action === 'hold' ? '预计下次调仓变化（今日不调仓）' : '本次调仓变化';
+    html += `<div style="color:var(--faint)">${tipTxt}</div>`;
     html += `<div>新增：${(c.added || []).map(x => `<span class="add">${nm(x)}</span>`).join('、') || '无'}</div>`;
     html += `<div>剔除：${(c.removed || []).map(x => `<span class="del">${nm(x)}</span>`).join('、') || '无'}</div>`;
     const wc = (c.weight_changes || []).map(x => `${nm(x)} ${(x.from * 100).toFixed(1)}%→${(x.to * 100).toFixed(1)}%`);
@@ -711,7 +1106,7 @@ function renderHeatmap(h){
     const sd = Math.sqrt(vals.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(vals.length||1)) || 1;
     st[f] = {mean, sd};
   });
-  // 转置：行=因子（8 行），列=个股，避免 69 行被压缩到 200px
+  // 转置：行=因子（8 行），列=个股，避免大池被压缩到 200px
   const mob = window.innerWidth <= 700;
   const cols = symbols.map(s=> h.names[s] || s);
   const arr = [];
@@ -737,7 +1132,10 @@ function renderHeatmap(h){
 }
 
 async function loadHeatmap(){
-  try{ const r = await fetch('/api/factors/latest?universe=' + state.universe,{cache:'no-store'}); renderHeatmap(await r.json()); }catch(e){}
+  try{
+    const r = await fetch('/api/factors/latest?universe=' + state.universe,{cache:'no-store'});
+    renderHeatmap(await r.json());
+  }catch(e){}
 }
 
 async function openStock(symbol){
@@ -757,7 +1155,6 @@ async function openStock(symbol){
       series:[{name:'主力净额',type:'bar',data:flow.map(x=>x.main_net),
         itemStyle:{color:p=>p.value>=0?'#ef4444':'#10b981'}}]
     }, true);
-    // 因子时序（ret_5 与 rsi14）
     const byF = {};
     (d.factors||[]).forEach(x=>{ (byF[x.factor]=byF[x.factor]||[]).push([x.trade_date,x.value]); });
     const dates = [...new Set((d.factors||[]).map(x=>x.trade_date))].sort();
@@ -771,11 +1168,252 @@ async function openStock(symbol){
       xAxis:{type:'category',data:dates,boundaryGap:false,...ax(),axisLabel:{...ax().axisLabel,rotate:30}},
       yAxis:{type:'value',scale:true,...ax()}, tooltip:tip(), series
     }, true);
+    setTimeout(() => { Object.values(charts).forEach(c => c.resize()); }, 60);
   }catch(e){ $('modalTitle').textContent = '加载失败：' + e.message; }
 }
 $('modalClose').onclick = () => $('modal').classList.remove('open');
 $('modal').onclick = e => { if (e.target.id === 'modal') $('modal').classList.remove('open'); };
 
+/* ---------- 股票池管理 ---------- */
+function setMsg(text){
+  const a = $('poolAdminMsg'); if (a) a.textContent = text;
+  const b = $('poolOpsMsg'); if (b) b.textContent = text;
+}
+
+async function activatePool(id){
+  setMsg('任务启动中…');
+  try{
+    const r = await fetch(`/api/pools/${id}/activate`, {method:'POST'});
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 409){
+      setMsg('已有池任务运行中，请稍后再试');
+      return;
+    }
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    setMsg('任务运行中…');
+    pollJob(id);
+  }catch(e){
+    setMsg('启动失败：' + e.message);
+  }
+}
+
+function pollJob(id){
+  if (poolsState.jobTimer) clearInterval(poolsState.jobTimer);
+  poolsState.jobTimer = setInterval(async () => {
+    try{
+      const r = await fetch(`/api/pools/${id}/job`, {cache:'no-store'});
+      const job = await r.json();
+      renderJob(job);
+      if (['ok', 'skipped', 'failed', 'busy'].includes(job.status)){
+        clearInterval(poolsState.jobTimer);
+        poolsState.jobTimer = null;
+        setMsg(job.status === 'failed' ? '任务失败，详见步骤明细' : '任务完成');
+        await loadPools();
+        if (state.view === 'pool' && state.universe === id) load();
+        if (document.getElementById('memberModal').classList.contains('open')) openMemberModal(id);
+      }
+    }catch(e){}
+  }, 2000);
+}
+
+function renderJob(job){
+  const mark = {ok:'✓', skipped:'·', failed:'✗', running:'…', busy:'!'};
+  const statusText = {ok:'完成', skipped:'全部跳过', failed:'失败', running:'运行中', busy:'繁忙', idle:'未运行'};
+  const head = `任务 ${job.task_id || ''} · ${statusText[job.status] || job.status}`
+    + (job.trigger ? ` · ${job.trigger === 'scheduler' ? '每日调度' : '手动'}` : '');
+  const lines = (job.actions || []).map(a => `${mark[a.status] || '·'} ${a.step}：${a.message || ''}`);
+  const text = [head, ...lines].join('\n');
+  ['poolJobBox', 'poolJobBoxDetail'].forEach(id => {
+    const box = $(id);
+    if (box){ box.style.display = 'block'; box.textContent = text; }
+  });
+}
+
+function openPoolModal(mode, poolId){
+  poolModalState.mode = mode;
+  poolModalState.poolId = poolId || null;
+  poolModalState.items = [];
+  const isCreate = mode === 'create', isAdd = mode === 'add';
+  $('poolModalTitle').textContent = isCreate ? '新建股票池' : isAdd ? '添加股票' : '修改股票池名称';
+  $('poolNameRow').style.display = (isCreate || mode === 'rename') ? 'flex' : 'none';
+  $('poolCodeRow').style.display = (isCreate || isAdd) ? 'block' : 'none';
+  $('poolNameInput').value = '';
+  $('poolCodesInput').value = '';
+  $('poolResolveBody').innerHTML = '';
+  $('poolResolveMsg').textContent = '';
+  $('poolModalSubmit').textContent = isCreate ? '确认创建' : isAdd ? '确认添加' : '保存名称';
+  if (mode === 'rename' && poolId){
+    const pool = poolOf(poolId);
+    if (pool) $('poolNameInput').value = pool.name || '';
+  }
+  $('poolModal').classList.add('open');
+}
+
+function splitCodes(str){
+  return (str || '').split(/[\s,，;；、]+/).map(s => s.trim()).filter(Boolean);
+}
+
+async function resolvePoolCodes(){
+  const codes = splitCodes($('poolCodesInput').value);
+  if (!codes.length){ $('poolResolveMsg').textContent = '请先输入股票代码'; return; }
+  $('poolResolveMsg').textContent = '解析中…';
+  try{
+    const r = await fetch('/api/pools/resolve', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({codes}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    poolModalState.items = d.items || [];
+    renderResolveTable();
+    const ok = poolModalState.items.filter(x => x.resolved).length;
+    $('poolResolveMsg').textContent = `共 ${poolModalState.items.length} 只，已识别 ${ok} 只`;
+  }catch(e){
+    $('poolResolveMsg').textContent = '解析失败：' + e.message;
+  }
+}
+
+function renderResolveTable(){
+  $('poolResolveBody').innerHTML = poolModalState.items.map((x, i) => {
+    if (!x.valid){
+      return `<tr><td>${x.symbol}</td><td colspan="3" class="reasons">非法代码</td>`
+        + '<td><span class="badge-warn">忽略</span></td></tr>';
+    }
+    const nameCell = x.resolved
+      ? `<td>${x.name}</td>`
+      : `<td><input class="input" id="poolName_${i}" placeholder="请输入名称"/></td>`;
+    return `<tr><td>${x.symbol}</td>${nameCell}<td>${x.market || ''}</td>`
+      + `<td>${x.is_etf ? '是' : ''}</td>`
+      + `<td>${x.resolved ? '<span class="badge-ok">已识别</span>'
+                         : '<span class="badge-warn">需补名称</span>'}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">暂无解析结果</td></tr>';
+}
+
+function collectMembers(){
+  const out = [];
+  poolModalState.items.forEach((x, i) => {
+    if (!x.valid) return;
+    const el = document.getElementById('poolName_' + i);
+    const name = ((el ? el.value : x.name) || '').trim();
+    out.push({symbol: x.symbol, name});
+  });
+  return out;
+}
+
+async function submitPoolModal(){
+  const mode = poolModalState.mode;
+  try{
+    let url = '/api/pools', method = 'POST', body;
+    if (mode === 'rename'){
+      const name = $('poolNameInput').value.trim();
+      if (!name) throw new Error('请填写股票池名称');
+      url = `/api/pools/${poolModalState.poolId}`;
+      method = 'PATCH';
+      body = {name};
+    }else{
+      const members = collectMembers();
+      if (!members.length) throw new Error('请先解析并确认至少一只股票');
+      if (members.some(m => !m.name)) throw new Error('存在未填写名称的股票');
+      if (mode === 'create'){
+        const name = $('poolNameInput').value.trim();
+        if (!name) throw new Error('请填写股票池名称');
+        body = {name, members};
+      }else{
+        url = `/api/pools/${poolModalState.poolId}/members`;
+        body = {members};
+      }
+    }
+    const r = await fetch(url, {
+      method, headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    $('poolModal').classList.remove('open');
+    if (mode === 'create'){
+      setMsg(`已创建 ${d.id} · ${d.name}`);
+      await loadPools();
+      goPool(d.id);
+    }else{
+      setMsg(mode === 'rename' ? '名称已保存' : '已添加成员');
+      await loadPools();
+      if (state.view === 'pool') renderPoolHeader();
+    }
+  }catch(e){
+    setMsg('提交失败：' + e.message);
+  }
+}
+
+async function toggleSchedule(id, enabled){
+  try{
+    const r = await fetch(`/api/pools/${id}/schedule`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({enabled}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    setMsg(enabled ? '已开启每日调度' : '已关闭每日调度');
+    await loadPools();
+  }catch(e){
+    setMsg('操作失败：' + e.message);
+  }
+}
+
+async function openMemberModal(id){
+  $('memberModal').classList.add('open');
+  $('memberModalTitle').textContent = '成员管理';
+  $('memberModalHint').textContent = '';
+  $('memberModalBody').innerHTML = '<tr><td colspan="6" class="empty">加载中…</td></tr>';
+  try{
+    const r = await fetch('/api/pools/' + id, {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    $('memberModalTitle').textContent = `${d.name} · ${d.id} · ${d.members_count} 只`;
+    $('memberModalHint').textContent = d.readonly
+      ? '内置池成员只读；如需调整请使用 CLI/CSV/YAML 刷新流程。'
+      : '可删除成员；添加股票请使用“添加股票”。';
+    $('memberModalBody').innerHTML = (d.members || []).map(m => `
+      <tr><td>${m.symbol}</td><td>${m.name || '--'}</td><td>${m.sector_code || ''}</td>
+      <td>${m.source || ''}</td><td>${m.updated_at || '--'}</td>
+      <td>${d.readonly ? '' : `<button class="icon-btn" onclick="removePoolMember('${d.id}','${m.symbol}')">删除</button>`}</td></tr>`
+    ).join('') || '<tr><td colspan="6" class="empty">暂无成员</td></tr>';
+  }catch(e){
+    $('memberModalBody').innerHTML = `<tr><td colspan="6" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+async function removePoolMember(id, symbol){
+  if (!confirm(`确认从 ${id} 删除 ${symbol}？`)) return;
+  try{
+    const r = await fetch(`/api/pools/${id}/members/${symbol}`, {method:'DELETE'});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    await loadPools();
+    await openMemberModal(id);
+    if (state.view === 'pool' && state.universe === id) load();
+  }catch(e){
+    alert('删除失败：' + e.message);
+  }
+}
+
+$('navOverview').onclick = goOverview;
+$('newPoolBtn').onclick = () => openPoolModal('create');
+$('navNewPool').onclick = () => openPoolModal('create');
+$('poolResolveBtn').onclick = resolvePoolCodes;
+$('poolModalSubmit').onclick = submitPoolModal;
+$('poolModalClose').onclick = () => $('poolModal').classList.remove('open');
+$('poolModalCancel').onclick = () => $('poolModal').classList.remove('open');
+$('poolModal').onclick = e => { if (e.target.id === 'poolModal') $('poolModal').classList.remove('open'); };
+$('memberModalClose').onclick = () => $('memberModal').classList.remove('open');
+$('memberModal').onclick = e => { if (e.target.id === 'memberModal') $('memberModal').classList.remove('open'); };
+
+/* ---------- 移动端抽屉 ---------- */
+function openDrawer(){ $('sidebar').classList.add('open'); $('drawerMask').classList.add('open'); }
+function closeDrawer(){ $('sidebar').classList.remove('open'); $('drawerMask').classList.remove('open'); }
+$('menuBtn').onclick = openDrawer;
+$('drawerMask').onclick = closeDrawer;
+
+/* ---------- AI 日报 ---------- */
 async function genReport(){
   $('reportBox').textContent = '生成中…';
   try{
@@ -830,11 +1468,14 @@ function applyTheme(t){
   document.documentElement.dataset.theme = t;
   $('themeBtn').textContent = t === 'dark' ? '☀ 浅色' : '🌙 深色';
   localStorage.setItem('theme', t);
-  if (state.data) render(state.data);
-  if (univState.data) renderUnivDetail();
-  loadHeatmap();
-  loadPortfolio();
-  loadTracking();
+  if (state.view === 'pool'){
+    if (state.data) render(state.data);
+    if (univState.data) renderUnivDetail();
+    loadHeatmap();
+    loadPortfolio();
+    loadTracking();
+  }
+  renderPoolCards();
 }
 $('themeBtn').onclick = () => applyTheme(theme() === 'dark' ? 'light' : 'dark');
 
@@ -847,15 +1488,20 @@ async function load(){
     loadPortfolio();
     loadTracking();
   }catch(e){
-    document.body.insertAdjacentHTML('beforeend', `<div class="wrap"><div class="empty">加载失败：${e.message}</div></div>`);
+    $('pagePool').insertAdjacentHTML('beforeend', `<div class="empty">加载失败：${e.message}</div>`);
   }
 }
 window.addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
+window.addEventListener('hashchange', applyView);
 
+/* ---------- 启动 ---------- */
 applyTheme(localStorage.getItem('theme') || 'dark');
-load();
-loadUniverses();
-connectWS();
+(async () => {
+  await loadPools();
+  if (!location.hash) history.replaceState(null, '', '#/overview');
+  applyView();
+  connectWS();
+})();
 </script>
 </body>
 </html>

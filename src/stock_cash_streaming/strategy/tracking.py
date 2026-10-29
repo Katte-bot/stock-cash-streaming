@@ -73,8 +73,12 @@ def simulate_tracking(
     end_date: str | None = None,
     cost_rate: float = DEFAULT_COST_RATE,
     persist: bool = False,
+    universe_id: str | None = None,
 ) -> dict:
-    """按调仓快照模拟跟踪净值。"""
+    """按调仓快照模拟跟踪净值。
+
+    universe_id : 非空时基准改为该股票池等权买入持有；为空保持板块成分基准。
+    """
     snaps = _snapshots(repo, strategy, start_date)
     if not snaps:
         return {"status": "waiting", "strategy": strategy,
@@ -112,9 +116,13 @@ def simulate_tracking(
         return {"status": "waiting", "strategy": strategy, "baseline_date": start,
                 "message": "等待行情数据"}
 
-    # 基准：板块成分等权买入持有
-    bench_syms = [r["symbol"] for r in repo.query(
-        "SELECT DISTINCT symbol FROM dim_sector_member")]
+    # 基准：默认板块成分等权；指定股票池时改为该池成员等权
+    if universe_id:
+        from ..research.universe import universe_symbols
+        bench_syms = universe_symbols(repo, universe_id)
+    else:
+        bench_syms = [r["symbol"] for r in repo.query(
+            "SELECT DISTINCT symbol FROM dim_sector_member")]
     bclose = _close_matrix(repo, bench_syms, start)
     if bclose.empty:
         bench = pd.Series(1.0, index=close.index)

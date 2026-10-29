@@ -18,10 +18,13 @@ CREATE TABLE IF NOT EXISTS dim_stock (
 
 -- 股票池定义（C0/C1/C2/C3 ...）
 CREATE TABLE IF NOT EXISTS dim_universe (
-    universe_id TEXT PRIMARY KEY,
-    name        TEXT,
-    description TEXT,
-    updated_at  TEXT
+    universe_id        TEXT PRIMARY KEY,
+    name               TEXT,
+    description        TEXT,
+    updated_at         TEXT,
+    is_custom          INTEGER NOT NULL DEFAULT 0,   -- 1=用户自建池（可改名/增删成员）
+    daily_enabled      INTEGER NOT NULL DEFAULT 0,   -- 1=纳入每日池任务（C0 由全局流水线维护）
+    members_updated_at TEXT                          -- 成员最近变更时间（用于判断回测是否过期）
 );
 
 -- 股票池成员（快照；C0 由板块成分派生，C1 由用户 CSV 录入）

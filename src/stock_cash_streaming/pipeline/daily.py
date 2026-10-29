@@ -21,6 +21,7 @@ from ..storage.repository import open_repository
 from ..strategy.portfolio import STRATEGY_NAMES, build_target_portfolio
 from ..strategy.signal import generate_signals
 from ..strategy.tracking import simulate_tracking
+from .pool_jobs import release_job_lock, run_enabled_pool_jobs, try_acquire_job_lock
 
 
 def _latest_quote_date(repo) -> str | None:
@@ -34,6 +35,11 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
     today = started.strftime("%Y-%m-%d")
     task_id = f"daily_{started.strftime('%Y%m%d')}"
     result: dict = {"task_id": task_id, "date": today, "status": "ok", "steps": {}}
+    # 与池任务共用跨进程锁：池任务运行中时让路，避免并发写库
+    lock = try_acquire_job_lock()
+    if lock is None:
+        result.update(status="skipped", reason="池任务运行中，稍后重试")
+        return result
     repo = open_repository()
     try:
         if not is_trading_day() and not force:
@@ -112,6 +118,13 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
             logger.warning(f"回撤监控失败: {e}")
             result["steps"]["risk_monitor"] = {"error": str(e)}
 
+        # 7) 池级每日任务（数据/因子/组合/跟踪，回测按需）
+        try:
+            result["steps"]["pool_jobs"] = run_enabled_pool_jobs(repo)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"池任务执行失败: {e}")
+            result["steps"]["pool_jobs"] = {"error": str(e)}
+
         result["status"] = "ok"
         logger.info(f"每日流水线完成 {today}: {result['status']}")
         return result
@@ -131,3 +144,4 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"task_log 写入失败: {e}")
         repo.close()
+        release_job_lock(lock)

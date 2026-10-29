@@ -21,16 +21,31 @@ RESEARCH_FACTORS = ["vol_20", "turnover_5", "turnover_std_20", "amount_20d",
 
 # ---------- 数据加载 ----------
 
-def _load_quotes(repo: Repository) -> pd.DataFrame:
+def _symbol_filter(symbols: list[str] | None) -> tuple[str, tuple]:
+    """构造 `AND symbol IN (...)` 片段；symbols 为空时返回空片段（全库）。"""
+    if not symbols:
+        return "", ()
+    ph = ",".join("?" for _ in symbols)
+    return f" AND symbol IN ({ph})", tuple(symbols)
+
+
+def _load_quotes(repo: Repository, symbols: list[str] | None = None) -> pd.DataFrame:
+    """读取行情。symbols 非空时只读该代码集合（池任务用于避免全库重算）。"""
+    where, params = _symbol_filter(symbols)
     rows = repo.query(
-        "SELECT symbol, trade_date, close, amount, turnover, pct_chg FROM fact_quote ORDER BY symbol, trade_date"
+        "SELECT symbol, trade_date, close, amount, turnover, pct_chg FROM fact_quote "
+        f"WHERE 1=1{where} ORDER BY symbol, trade_date",
+        params,
     )
     return pd.DataFrame([dict(r) for r in rows])
 
 
-def _load_flows(repo: Repository) -> pd.DataFrame:
+def _load_flows(repo: Repository, symbols: list[str] | None = None) -> pd.DataFrame:
+    where, params = _symbol_filter(symbols)
     rows = repo.query(
-        "SELECT symbol, trade_date, main_net, xl_net FROM fact_stock_flow ORDER BY symbol, trade_date"
+        "SELECT symbol, trade_date, main_net, xl_net FROM fact_stock_flow "
+        f"WHERE 1=1{where} ORDER BY symbol, trade_date",
+        params,
     )
     return pd.DataFrame([dict(r) for r in rows])
 
@@ -130,20 +145,22 @@ def _write_factors(repo: Repository, df: pd.DataFrame) -> dict[str, int]:
 
 
 def compute_all(repo: Repository, include_flow: bool = True,
-                keep_factors: list[str] | None = None) -> dict[str, int]:
+                keep_factors: list[str] | None = None,
+                symbols: list[str] | None = None) -> dict[str, int]:
     """计算全部因子并入库，返回各因子写入行数。
 
     include_flow : 是否计算资金流因子
     keep_factors : 仅保留指定因子（研究模式，减少写入量）
+    symbols      : 只计算该代码集合（None 表示全库，保持原有行为）
     """
-    q = _load_quotes(repo)
+    q = _load_quotes(repo, symbols)
     if q.empty:
         logger.warning("无行情数据，跳过因子计算")
         return {}
     tech = compute_technical(q)
     frames = [tech]
     if include_flow:
-        f = _load_flows(repo)
+        f = _load_flows(repo, symbols)
         flow = compute_flow(q, f)
         if not flow.empty:
             frames.append(flow)
