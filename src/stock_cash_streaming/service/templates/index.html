@@ -664,8 +664,12 @@ function dataBadge(p){
   return `<span class="badge-warn">无数据</span>`;
 }
 function btBadge(p){
-  if (p.backtest_state === 'latest') return `<span class="badge-ok">已回测至 ${p.backtest_end || ''}</span>`;
-  if (p.backtest_state === 'stale') return '<span class="badge-warn">回测需更新</span>';
+  const end = p.backtest_end || '';
+  if (p.backtest_state === 'latest') return `<span class="badge-ok">已回测至 ${end}</span>`;
+  if (p.backtest_state === 'stale'){
+    const lag = p.backtest_lag_days || 0;
+    return `<span class="badge-warn">回测 ${end}${lag ? ` · 落后 ${lag} 日` : ' · 成员已变更'}</span>`;
+  }
   return '<span class="badge-off">未回测</span>';
 }
 function scheduleBadge(p){
@@ -691,6 +695,9 @@ function renderPoolCards(){
     if (p.is_custom){
       ops.push(`<button class="icon-btn" onclick="event.stopPropagation();openPoolModal('rename','${p.id}')">改名</button>`);
       ops.push(`<button class="icon-btn" onclick="event.stopPropagation();openPoolModal('add','${p.id}')">添加股票</button>`);
+    }
+    // C0 由全局流水线维护，不可关闭；其余池（含内置 C1~C3）可开关每日调度
+    if (p.id !== 'C0'){
       ops.push(`<button class="icon-btn" onclick="event.stopPropagation();toggleSchedule('${p.id}', ${p.schedule_enabled ? 'false' : 'true'})">`
         + `${p.schedule_enabled ? '关闭调度' : '开启调度'}</button>`);
     }
@@ -730,8 +737,10 @@ function renderPoolHeader(){
   if (p && p.is_custom){
     ops.push(`<button class="btn" onclick="openPoolModal('rename','${id}')">改名</button>`);
     ops.push(`<button class="btn" onclick="openPoolModal('add','${id}')">添加股票</button>`);
-    ops.push(`<button class="btn" onclick="toggleSchedule('${id}', ${p.schedule_enabled ? 'false' : 'true'})">`
-      + `${p.schedule_enabled ? '关闭调度' : '开启调度'}</button>`);
+  }
+  if (id !== 'C0'){
+    ops.push(`<button class="btn" onclick="toggleSchedule('${id}', ${p && p.schedule_enabled ? 'false' : 'true'})">`
+      + `${p && p.schedule_enabled ? '关闭调度' : '开启调度'}</button>`);
   }
   $('poolOps').innerHTML = ops.join('');
 }

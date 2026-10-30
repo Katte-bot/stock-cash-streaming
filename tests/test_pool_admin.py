@@ -50,7 +50,8 @@ def test_create_pool_and_status(repo):
     assert "C0" in listed  # 迁移时已落 C0 行
     assert listed["U1"]["data_state"] == "missing"
     assert listed["U1"]["backtest_state"] == "missing"
-    assert listed["U1"]["schedule_enabled"] is False
+    # 新建池默认纳入每日池任务
+    assert listed["U1"]["schedule_enabled"] is True
 
 
 def test_rename_add_remove(repo):

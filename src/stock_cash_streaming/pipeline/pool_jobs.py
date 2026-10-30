@@ -414,10 +414,12 @@ def start_pool_job(pool_id: str) -> dict:
 
 
 def run_enabled_pool_jobs(repo: Repository) -> dict:
-    """每日流水线调用：逐个执行已开启调度的非 C0 池（调用方已持锁）。"""
+    """每日流水线调用：逐个执行已开启调度的池（调用方已持锁）。
+
+    包含 C0：C0 的池任务只补数据/因子/回测，组合与跟踪仍由全局流水线负责。
+    """
     rows = repo.query(
-        "SELECT universe_id FROM dim_universe WHERE daily_enabled=1 AND universe_id<>? "
-        "ORDER BY universe_id", (C0,))
+        "SELECT universe_id FROM dim_universe WHERE daily_enabled=1 ORDER BY universe_id")
     out: dict = {}
     for r in rows:
         pid = r["universe_id"]

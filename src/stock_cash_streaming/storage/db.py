@@ -51,3 +51,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    datetime('now','localtime'), 0, 1)
            ON CONFLICT(universe_id) DO NOTHING"""
     )
+
+    # 一次性迁移（user_version=2）：所有股票池默认纳入每日池任务，
+    # 保证“数据 + 因子 + 回测 + 组合/跟踪”每天都跟随最新行情刷新。
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
+        conn.execute("UPDATE dim_universe SET daily_enabled=1")
+        conn.execute("PRAGMA user_version=2")

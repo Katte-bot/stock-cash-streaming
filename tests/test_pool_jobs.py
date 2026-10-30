@@ -157,6 +157,8 @@ def test_enabled_pool_jobs_isolated(repo, monkeypatch):
 
     monkeypatch.setattr(pool_jobs, "run_pool_job", _fake)
     out = pool_jobs.run_enabled_pool_jobs(repo)
-    assert set(out) == {"U1", "U2"}
+    # C0 也纳入每日池任务（只补数据/因子/回测），因此一并返回
+    assert set(out) == {"C0", "U1", "U2"}
+    assert out["C0"]["status"] == "ok"
     assert out["U1"]["status"] == "ok"
     assert out["U2"]["status"] == "failed"

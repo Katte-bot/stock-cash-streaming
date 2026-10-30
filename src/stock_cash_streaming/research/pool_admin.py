@@ -292,8 +292,14 @@ def list_pools(repo: Repository) -> list[dict]:
         else:
             backtest_state = "latest"
 
-        # 最新回测的年化/夏普（总览页卡片用）
+        # 最新回测的年化/夏普（总览页卡片用）+ 落后最新行情的交易日数
         annual = sharpe = None
+        lag_days = 0
+        if bt and latest and bt["end_date"] and bt["end_date"] < latest:
+            lag_days = int(repo.query(
+                "SELECT COUNT(DISTINCT trade_date) AS n FROM fact_quote "
+                "WHERE trade_date > ? AND trade_date <= ?",
+                (bt["end_date"], latest))[0]["n"])
         if bt:
             series = repo.query(
                 "SELECT trade_date, nav, benchmark FROM backtest_result "
@@ -337,6 +343,7 @@ def list_pools(repo: Repository) -> list[dict]:
             "backtest_created_at": bt["created_at"] if bt else None,
             "backtest_annual": annual,
             "backtest_sharpe": sharpe,
+            "backtest_lag_days": lag_days,
             "signals_count": signals_count,
             "schedule_enabled": schedule_enabled,
             "schedule_note": "全局每日流水线" if pid == C0 else None,
@@ -358,7 +365,7 @@ def create_pool(repo: Repository, name: str, members: list[dict],
     repo.upsert("dim_universe", [{
         "universe_id": pool_id, "name": pool_name,
         "description": (description or "").strip(), "updated_at": now,
-        "is_custom": 1, "daily_enabled": 0, "members_updated_at": now,
+        "is_custom": 1, "daily_enabled": 1, "members_updated_at": now,
     }], ["universe_id"])
     _upsert_stock_members(repo, pool_id, prepared)
     logger.info(f"自定义股票池 {pool_id} 已创建：{pool_name}（{len(prepared)} 只）")
