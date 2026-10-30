@@ -75,21 +75,23 @@ def compute_signals(repo: Repository, trade_date: str | None = None,
     """按股票池计算信号（不落库），池内分行业横向打分。"""
     from ..research.universe import universe_members
 
+    members = universe_members(repo, universe)
+    if not members:
+        return []
+    syms = list(members)
+    sp = ",".join("?" for _ in syms)
     if trade_date is None:
+        # 用池内可达的最新因子日：某个池数据领先时，不牵连其它池返回空信号
         r = repo.query(
-            "SELECT MAX(trade_date) AS d FROM fact_factor WHERE factor='main_net_ratio_5d' AND version=?",
-            (version,),
+            "SELECT MAX(trade_date) AS d FROM fact_factor "
+            f"WHERE factor='main_net_ratio_5d' AND version=? AND symbol IN ({sp})",
+            tuple([version] + syms),
         )
         trade_date = r[0]["d"] if r else None
     if not trade_date:
         logger.warning("无资金流因子，无法生成信号")
         return []
 
-    members = universe_members(repo, universe)
-    if not members:
-        return []
-    syms = list(members)
-    sp = ",".join("?" for _ in syms)
     rows = repo.query(
         f"SELECT symbol, factor, value FROM fact_factor "
         f"WHERE trade_date=? AND version=? AND symbol IN ({sp})",

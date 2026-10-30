@@ -170,19 +170,22 @@ HEATMAP_FACTORS = ["vol_20", "turnover_5", "turnover_std_20", "amount_20d",
 
 @app.get("/api/factors/latest")
 def factors_latest(universe: str = "C0") -> dict:
-    """最新交易日的因子截面（用于热力图），可按股票池过滤。"""
+    """最新交易日的因子截面（用于热力图），按股票池取各自可达的最新因子日。"""
     from ..features.engine import FACTOR_VERSION
     from ..research.universe import universe_symbols
 
     repo = open_repository()
     try:
-        d = repo.query(
-            "SELECT MAX(trade_date) AS d FROM fact_factor WHERE version=?", (FACTOR_VERSION,)
-        )[0]["d"]
         symbols = universe_symbols(repo, universe)
         if not symbols:
-            return {"date": d, "factors": HEATMAP_FACTORS, "data": [], "names": {}}
+            return {"date": None, "factors": HEATMAP_FACTORS, "data": [], "names": {}}
         sp = ",".join("?" for _ in symbols)
+        d = repo.query(
+            f"SELECT MAX(trade_date) AS d FROM fact_factor "
+            f"WHERE version=? AND factor='vol_20' AND symbol IN ({sp})",
+            tuple([FACTOR_VERSION] + symbols))[0]["d"]
+        if not d:
+            return {"date": None, "factors": HEATMAP_FACTORS, "data": [], "names": {}}
         placeholders = ",".join("?" for _ in HEATMAP_FACTORS)
         rows = _rows(repo.query(
             f"SELECT symbol, factor, value FROM fact_factor "

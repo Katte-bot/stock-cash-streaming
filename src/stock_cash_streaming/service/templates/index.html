@@ -341,7 +341,7 @@
 
     <div class="card">
       <h2>AI 日报 <span class="tag" id="reportSource">DeepSeek</span></h2>
-      <p class="desc">基于当日板块资金流与信号自动生成（规则模板降级）</p>
+      <p class="desc">固定基于 <b>C0 当前板块成分</b>（电网设备 + 天然气）的板块资金流与 C0 落库信号生成，与当前浏览的股票池无关；规则模板降级</p>
       <button class="btn primary" id="reportBtn">生成日报</button>
       <div style="height:12px"></div>
       <div class="report" id="reportBox">点击上方按钮生成今日日报。</div>
@@ -401,12 +401,6 @@
         </div>
 
         <div class="card">
-          <h2>因子热力图 <span class="tag">最新截面 · Z-Score</span></h2>
-          <p class="desc">红=因子值高，绿=因子值低</p>
-          <div class="chart" id="heatmapChart"></div>
-        </div>
-
-        <div class="card">
           <h2>综合信号 <span class="tag">池内评分</span></h2>
           <p class="desc">防御型评分：低波动 / 低换手 / 低彩票特征 / 非流动性溢价，0–100 分</p>
           <div class="table-wrap">
@@ -458,7 +452,7 @@
       </div>
     </div>
 
-    <div class="sec collapsed" id="secHistory">
+    <div class="sec" id="secHistory">
       <div class="sec-head" onclick="toggleSec('secHistory')">
         <span>③ 回测与历史</span>
         <span class="meta">策略回测 · 分年度表现</span>
@@ -483,6 +477,20 @@
               <tbody id="univBody"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+    </div>
+    <div class="sec collapsed" id="secHeatmap">
+      <div class="sec-head" onclick="toggleSec('secHeatmap')">
+        <span>④ 因子热力图</span>
+        <span class="meta" id="heatTag">最新截面 · Z-Score</span>
+        <span class="chev">▾</span>
+      </div>
+      <div class="sec-body">
+        <div class="card">
+          <h2>因子截面 <span class="tag">红=因子值高，绿=因子值低</span></h2>
+          <p class="desc">按该池可达的最新因子日做 Z-Score 标准化；未展开时图表不渲染，展开后自动绘制</p>
+          <div class="chart" id="heatmapChart"></div>
         </div>
       </div>
     </div>
@@ -643,7 +651,10 @@ function applyView(){
 function toggleSec(id){
   const el = $(id);
   el.classList.toggle('collapsed');
-  if (!el.classList.contains('collapsed')) setTimeout(resizeCharts, 60);
+  if (!el.classList.contains('collapsed')){
+    if (id === 'secHeatmap') loadHeatmap();
+    setTimeout(resizeCharts, 60);
+  }
 }
 
 /* ---------- 总览 ---------- */
@@ -1105,7 +1116,14 @@ async function loadTracking(){
 }
 
 function renderHeatmap(h){
-  if (!h || !h.data || !h.data.length){ $('heatmapChart').innerHTML = '<div class="empty">暂无因子数据</div>'; return; }
+  if (!h || !h.data || !h.data.length){
+    $('heatTag').textContent = (h && h.date) ? `最新截面 ${h.date} · Z-Score` : '最新截面 · Z-Score';
+    if (charts['heatmapChart']){ charts['heatmapChart'].dispose(); delete charts['heatmapChart']; }
+    $('heatmapChart').innerHTML = '<div class="empty">该池暂无因子数据（可点“启动/更新”补齐）</div>';
+    return;
+  }
+  $('heatTag').textContent = `最新截面 ${h.date} · Z-Score`;
+  if (!charts['heatmapChart']) $('heatmapChart').innerHTML = '';
   const symbols = [...new Set(h.data.map(d=>d.symbol))];
   const factors = h.factors.filter(f => h.data.some(d=>d.factor===f));
   const st = {};
