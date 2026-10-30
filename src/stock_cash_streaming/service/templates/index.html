@@ -160,6 +160,10 @@
   .pcard-metrics .k{font-size:10.5px;color:var(--muted)}
   .pcard-metrics .v{font-size:16px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}
   .pool-status{display:flex;gap:6px;flex-wrap:wrap}
+  .pool-tag{display:inline-block;font-size:10.5px;font-weight:650;padding:2px 8px;border-radius:999px;
+        margin-left:7px;vertical-align:middle;letter-spacing:.3px}
+  .pool-tag.builtin{background:rgba(99,102,241,.24);color:#b3bfff;border:1px solid rgba(99,102,241,.55)}
+  .pool-tag.custom{background:rgba(34,211,238,.18);color:#7de9f7;border:1px solid rgba(34,211,238,.45)}
   .pcard-ops{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;border-top:1px solid var(--border);padding-top:10px}
   .pcard-ops .icon-btn{margin:0}
   /* ---------- 分区折叠 ---------- */
@@ -338,27 +342,14 @@
       <div class="pool-cards" id="poolCards"></div>
       <div class="report" id="poolJobBox" style="display:none;margin-top:14px"></div>
     </div>
-
-    <div class="card">
-      <h2>AI 日报 <span class="tag" id="reportSource">DeepSeek</span></h2>
-      <p class="desc">固定基于 <b>C0 当前板块成分</b>（电网设备 + 天然气）的板块资金流与 C0 落库信号生成，与当前浏览的股票池无关；规则模板降级</p>
-      <button class="btn primary" id="reportBtn">生成日报</button>
-      <div style="height:12px"></div>
-      <div class="report" id="reportBox">点击上方按钮生成今日日报。</div>
-    </div>
   </section>
 
   <!-- ==================== 股票池详情页 ==================== -->
   <section class="page" id="pagePool" hidden>
-    <div class="pfbar">
-      <div style="min-width:0">
-        <div style="font-size:15px;font-weight:650" id="poolTitle">--</div>
-        <div class="sub" id="poolSub">--</div>
-      </div>
-      <div style="flex:1"></div>
+    <div class="pfbar" style="margin-bottom:14px">
       <div id="poolOps" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+      <span class="reasons" id="poolOpsMsg"></span>
     </div>
-    <div class="reasons" id="poolOpsMsg" style="margin:-4px 0 12px"></div>
     <div class="report" id="poolJobBoxDetail" style="display:none;margin-bottom:14px"></div>
 
     <div class="kpis">
@@ -493,6 +484,14 @@
           <div class="chart" id="heatmapChart"></div>
         </div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>AI 日报 <span class="tag" id="reportSource">DeepSeek</span></h2>
+      <p class="desc" id="reportDesc">基于该池的行业资金流、池内信号与当前目标组合生成（规则模板降级）</p>
+      <button class="btn primary" id="reportBtn">生成该池日报</button>
+      <div style="height:12px"></div>
+      <div class="report" id="reportBox">点击上方按钮生成该池日报。</div>
     </div>
   </section>
 
@@ -629,15 +628,22 @@ function applyView(){
   const isPool = state.view === 'pool';
   $('pageOverview').hidden = isPool;
   $('pagePool').hidden = !isPool;
+  const pool = isPool ? poolOf(state.universe) : null;
   $('pageTitle').textContent = isPool ? poolLabel(state.universe) : '总览';
+  // 池详情只保留一行说明，避免标题重复
   $('pageSub').textContent = isPool
-    ? `${state.universe} · 池详情 · 成员 ${(poolOf(state.universe) || {}).members_count ?? '--'} 只`
+    ? [state.universe,
+       pool ? `${pool.members_count} 只` : '',
+       pool ? (pool.is_custom ? '自定义池（可编辑）' : '内置池（只读）') : '',
+       pool && pool.data_as_of ? `数据 ${pool.data_as_of}` : '']
+        .filter(Boolean).join(' · ')
     : '策略说明 · 全部股票池 · 今日概况';
   setActiveNav();
   closeDrawer();
   window.scrollTo({top:0});
   if (isPool){
     renderPoolHeader();
+    resetReport();
     load();
     loadUniverses();
   } else {
@@ -715,8 +721,10 @@ function renderPoolCards(){
     return `<div class="pcard" onclick="goPool('${p.id}')">
       <div class="pcard-head">
         <div>
-          <div class="pcard-name">${p.is_custom ? p.name : p.id}</div>
-          <div class="pcard-sub">${p.is_custom ? p.id + ' · 自定义池' : '内置池'}</div>
+          <div class="pcard-name">${p.is_custom ? p.name : p.id}`
+        + `${p.is_custom ? '<span class="pool-tag custom">自定义</span>'
+                        : '<span class="pool-tag builtin">内置池</span>'}</div>
+          <div class="pcard-sub">数据 ${p.data_as_of || '--'}</div>
         </div>
         <span class="pcard-go">→</span>
       </div>
@@ -735,10 +743,6 @@ function renderPoolCards(){
 function renderPoolHeader(){
   const id = state.universe;
   const p = poolOf(id);
-  $('poolTitle').textContent = p ? (p.is_custom ? p.name : p.id) : id;
-  $('poolSub').textContent = p
-    ? `${p.id} · ${p.members_count} 只 · ${p.is_custom ? '自定义池（可编辑）' : '内置池（只读）'}`
-    : id;
   const running = !!(p && p.job && p.job.status === 'running');
   const ops = [
     `<button class="btn primary" onclick="activatePool('${id}')" ${running ? 'disabled' : ''}>`
@@ -1440,15 +1444,27 @@ function closeDrawer(){ $('sidebar').classList.remove('open'); $('drawerMask').c
 $('menuBtn').onclick = openDrawer;
 $('drawerMask').onclick = closeDrawer;
 
-/* ---------- AI 日报 ---------- */
+/* ---------- AI 日报（按池） ---------- */
+function resetReport(){
+  const label = poolLabel(state.universe);
+  $('reportBox').textContent = `点击上方按钮生成「${label}」日报。`;
+  $('reportSource').textContent = 'DeepSeek';
+  $('reportDesc').textContent =
+    `基于「${label}」的行业资金流、池内信号与当前目标组合生成（规则模板降级）`;
+}
+
 async function genReport(){
-  $('reportBox').textContent = '生成中…';
+  const label = poolLabel(state.universe);
+  $('reportBox').textContent = `正在生成「${label}」日报…`;
   try{
-    const r = await fetch('/api/report', {method:'POST'});
+    const r = await fetch('/api/report?universe=' + encodeURIComponent(state.universe),
+      {method:'POST'});
     const d = await r.json();
     $('reportBox').textContent = d.content || '（空）';
     $('reportSource').textContent = d.source || 'template';
-  }catch(e){ $('reportBox').textContent = '生成失败：' + e.message; }
+  }catch(e){
+    $('reportBox').textContent = '生成失败：' + e.message;
+  }
 }
 $('reportBtn').onclick = genReport;
 

@@ -277,11 +277,11 @@ def intraday() -> dict:
 
 
 @app.post("/api/report")
-def report() -> dict:
-    """生成 AI 日报（DeepSeek；失败降级规则模板）。"""
+def report(universe: str = "C0") -> dict:
+    """生成指定股票池的 AI 日报（DeepSeek；失败降级规则模板）。"""
     from ..report.daily import generate_daily_report
 
-    return generate_daily_report()
+    return generate_daily_report(universe=universe)
 
 
 @app.websocket("/ws/realtime")
