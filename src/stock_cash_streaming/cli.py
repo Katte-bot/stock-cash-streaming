@@ -339,6 +339,44 @@ def _cmd_tracking(args) -> None:
         print(f"\n待执行调仓：{res['pending_rebalance']}（等待次一交易日行情）")
 
 
+def _cmd_paper(args) -> None:
+    from .strategy.paper import paper_summary, rebuild_paper_account, reset_paper_account
+
+    repo = open_repository()
+    try:
+        if args.reset:
+            print(f"重置 {args.universe} 模拟账户（初始资金 {args.capital:,.0f}）…")
+            res = reset_paper_account(repo, args.universe, args.capital)
+            if res.get("status") != "ok":
+                print(res.get("message") or res.get("status"))
+                return
+        summary = paper_summary(repo, args.universe, trade_limit=1)
+        if summary.get("status") == "not_initialized":
+            print(f"{args.universe} 尚未初始化，开始回放历史（约 20 秒）…")
+            res = rebuild_paper_account(repo, args.universe, args.capital)
+            if res.get("status") != "ok":
+                print(res.get("message") or res.get("status"))
+                return
+            summary = paper_summary(repo, args.universe, trade_limit=1)
+    finally:
+        repo.close()
+
+    acc, m = summary["account"], summary["metrics"]
+    print(f"\n===== 模拟持仓 {args.universe} =====")
+    print(f"初始资金    : {acc['initial_capital']:,.2f}")
+    print(f"总资产      : {acc['total_value']:,.2f}（累计 {m['total_return']:+.2%}）")
+    print(f"现金        : {acc['cash']:,.2f} | 持仓市值 {acc['total_value'] - acc['cash']:,.2f}"
+          f" | 仓位 {acc['exposure']:.1%}")
+    print(f"区间        : {acc['start_date']} ~ {acc['last_date']}"
+          f"（{m['days']} 个交易日，调仓 {acc['rebalances']} 次，成交 {acc['trades_count']} 笔）")
+    if m.get("annual_return") is not None:
+        print(f"年化收益    : {m['annual_return']:+.2%} | 最大回撤 {m['max_drawdown']:.2%}")
+    print("\n持仓（按市值前 10）：")
+    for p in summary["positions"][:10]:
+        print(f"  {p['name'] or p['symbol']}({p['symbol']})  {p['shares']} 股 × "
+              f"{p['last_price']:.3f} = {p['market_value']:,.2f}（{p['weight']:.1%}）")
+
+
 def _cmd_daily(args) -> None:
     from .pipeline.daily import run_daily_pipeline
 
@@ -815,6 +853,12 @@ def main(argv: list[str] | None = None) -> None:
                       default="defensive", help="跟踪哪个策略的调仓快照")
     p_tr.add_argument("--no-persist", action="store_true", help="不写入跟踪净值历史")
     p_tr.set_defaults(func=_cmd_tracking)
+
+    p_pp = sub.add_parser("paper", help="模拟持仓（纸面账户）：查看 / 初始化 / 重置")
+    p_pp.add_argument("--universe", default="C0", help="股票池 ID（当前仅 C0）")
+    p_pp.add_argument("--capital", type=float, default=100000.0, help="初始资金（默认 100000）")
+    p_pp.add_argument("--reset", action="store_true", help="清空并按当前组合重建账户")
+    p_pp.set_defaults(func=_cmd_paper)
 
     p_daily = sub.add_parser("daily", help="每日自动流水线（增量→因子→信号→组合→跟踪）")
     p_daily.add_argument("--force", action="store_true", help="非交易日/行情未更新时也强制执行")

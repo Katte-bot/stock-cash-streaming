@@ -443,9 +443,50 @@
       </div>
     </div>
 
+    <div class="sec" id="secPaper">
+      <div class="sec-head" onclick="toggleSec('secPaper')">
+        <span>③ 模拟持仓（10 万）</span>
+        <span class="meta">纸面账户 · 整手成交 · 含费用</span>
+        <span class="chev">▾</span>
+      </div>
+      <div class="sec-body">
+        <div class="card">
+          <h2>模拟账户 <span class="tag" id="paperTag">--</span></h2>
+          <p class="desc">按回测/目标组合的月频调仓自动成交（信号日次一交易日收盘），整手买卖，含佣金 / 印花税 / 过户费；不含分红再投</p>
+          <div class="pfbar">
+            <span class="pill">初始资金 <b id="ppCapital">--</b></span>
+            <span class="pill">总资产 <b id="ppTotal">--</b></span>
+            <span class="pill">累计收益 <b id="ppReturn">--</b></span>
+            <span class="pill">现金 <b id="ppCash">--</b></span>
+            <span class="pill">持仓市值 <b id="ppMv">--</b></span>
+            <span class="pill">仓位 <b id="ppExposure">--</b></span>
+            <button class="btn" id="paperResetBtn" style="margin-left:auto">初始化账户（10 万）</button>
+          </div>
+          <div class="mgrid" id="ppMetrics"></div>
+          <h2>资产曲线 <span class="tag">模拟总资产 vs 该池等权</span></h2>
+          <div class="chart" id="paperChart"></div>
+          <h2 style="margin-top:16px">当前持仓 <span class="tag">按市值排序</span></h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>股票</th><th class="num">持股</th><th class="num">成本价</th><th class="num">现价</th><th class="num">市值</th><th class="num">占比</th><th class="num">盈亏</th></tr></thead>
+              <tbody id="paperPositions"></tbody>
+            </table>
+          </div>
+          <h2 style="margin-top:16px">成交流水 <span class="tag" id="paperTradeTag">--</span></h2>
+          <div class="table-wrap" style="max-height:320px;overflow-y:auto">
+            <table>
+              <thead><tr><th>日期</th><th>方向</th><th>股票</th><th class="num">价格</th><th class="num">股数</th><th class="num">金额</th><th class="num">费用</th></tr></thead>
+              <tbody id="paperTrades"></tbody>
+            </table>
+          </div>
+          <div class="pfdiff" id="paperNote"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="sec" id="secHistory">
       <div class="sec-head" onclick="toggleSec('secHistory')">
-        <span>③ 回测与历史</span>
+        <span>④ 回测与历史</span>
         <span class="meta">策略回测 · 分年度表现</span>
         <span class="chev">▾</span>
       </div>
@@ -473,7 +514,7 @@
     </div>
     <div class="sec collapsed" id="secHeatmap">
       <div class="sec-head" onclick="toggleSec('secHeatmap')">
-        <span>④ 因子热力图</span>
+        <span>⑤ 因子热力图</span>
         <span class="meta" id="heatTag">最新截面 · Z-Score</span>
         <span class="chev">▾</span>
       </div>
@@ -1119,6 +1160,145 @@ async function loadTracking(){
   }catch(e){}
 }
 
+/* ---------- 模拟持仓（纸面账户） ---------- */
+const fmtMoney = v => (v === null || v === undefined || isNaN(v)) ? '--'
+  : Number(v).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+function paperEnabled(){
+  return state.universe === 'C0';
+}
+
+async function loadPaper(){
+  if (!paperEnabled()){ renderPaper({status: 'disabled'}); return; }
+  try{
+    const r = await fetch('/api/paper?universe=' + state.universe, {cache:'no-store'});
+    renderPaper(await r.json());
+  }catch(e){}
+}
+
+function clearPaper(){
+  ['ppTotal', 'ppReturn', 'ppCash', 'ppMv', 'ppExposure'].forEach(id => {
+    const el = $(id); if (el) el.textContent = '--';
+  });
+  $('ppMetrics').innerHTML = '';
+  $('paperPositions').innerHTML = '<tr><td colspan="7" class="empty">暂无持仓</td></tr>';
+  $('paperTrades').innerHTML = '<tr><td colspan="7" class="empty">暂无成交</td></tr>';
+  $('paperTradeTag').textContent = '--';
+  if (charts['paperChart']){ charts['paperChart'].dispose(); delete charts['paperChart']; }
+  $('paperChart').innerHTML = '';
+}
+
+function renderPaper(p){
+  const enabled = paperEnabled() && (!p || p.enabled !== false);
+  const ok = p && p.status === 'ok' && enabled;
+  const cap = (p && (p.account?.initial_capital ?? p.capital)) ?? 100000;
+  $('ppCapital').textContent = fmtMoney(cap);
+  $('paperResetBtn').textContent = ok ? '重置账户（10 万）' : '初始化账户（10 万）';
+  $('paperResetBtn').disabled = !enabled;
+
+  if (!ok){
+    clearPaper();
+    if (!enabled){
+      $('paperTag').textContent = '未开放';
+      $('paperNote').textContent = '模拟持仓目前仅对 C0 股票池开放，其它池待 C0 运行稳定后扩展。';
+    } else {
+      $('paperTag').textContent = '未初始化';
+      $('paperNote').textContent = '尚未初始化。点击右上「初始化账户」，首次会按 2018 年以来的月频调仓回放历史（约 20 秒），之后每日自动跟踪。';
+    }
+    return;
+  }
+
+  const acc = p.account, m = p.metrics;
+  $('paperTag').textContent = `${acc.start_date || ''} ~ ${acc.last_date || ''}`;
+  $('ppTotal').textContent = fmtMoney(acc.total_value);
+  $('ppReturn').innerHTML = `<span class="${cls(m.total_return)}">${fmtPct(m.total_return * 100)}</span>`;
+  $('ppCash').textContent = fmtMoney(acc.cash);
+  $('ppMv').textContent = fmtMoney(acc.total_value - acc.cash);
+  $('ppExposure').textContent = (acc.exposure * 100).toFixed(1) + '%';
+
+  const items = [
+    ['年化收益', m.annual_return == null ? '--' : fmtPct(m.annual_return * 100),
+      m.annual_return == null ? '' : cls(m.annual_return)],
+    ['最大回撤', fmtPct((m.max_drawdown || 0) * 100), 'down'],
+    ['调仓次数', acc.rebalances ?? '--', ''],
+    ['成交笔数', acc.trades_count ?? '--', ''],
+    ['交易日', m.days ?? '--', ''],
+    ['现金占比', acc.total_value ? (acc.cash / acc.total_value * 100).toFixed(1) + '%' : '--', ''],
+  ];
+  $('ppMetrics').innerHTML = items.map(([k, v, c]) =>
+    `<div class="m"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+
+  $('paperPositions').innerHTML = (p.positions || []).map(x => `
+    <tr class="clickable" onclick="openStock('${x.symbol}')">
+      <td>${x.name || ''}<span class="sym">${x.symbol}</span></td>
+      <td class="num">${x.shares}</td>
+      <td class="num">${Number(x.avg_cost).toFixed(3)}</td>
+      <td class="num">${Number(x.last_price).toFixed(3)}</td>
+      <td class="num">${fmtMoney(x.market_value)}</td>
+      <td class="num">${(x.weight * 100).toFixed(1)}%</td>
+      <td class="num ${cls(x.pnl)}">${fmtMoney(x.pnl)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="empty">暂无持仓</td></tr>';
+
+  const trades = (p.trades || []).slice(0, 50);
+  $('paperTrades').innerHTML = trades.map(t => `
+    <tr>
+      <td>${t.trade_date}</td>
+      <td class="${t.side === 'buy' ? 'up' : 'down'}">${t.side === 'buy' ? '买入' : '卖出'}</td>
+      <td>${t.name || ''}<span class="sym">${t.symbol}</span></td>
+      <td class="num">${Number(t.price).toFixed(3)}</td>
+      <td class="num">${t.shares}</td>
+      <td class="num">${fmtMoney(t.amount)}</td>
+      <td class="num">${fmtMoney(t.fee)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="empty">暂无成交</td></tr>';
+  $('paperTradeTag').textContent = `最近 ${trades.length} 笔 / 共 ${acc.trades_count || 0} 笔`;
+
+  const step = Math.max(1, Math.floor((p.nav || []).length / 400));
+  const navRows = (p.nav || []).filter((_, i) => i % step === 0 || i === (p.nav || []).length - 1);
+  const dates = navRows.map(x => x.trade_date);
+  const total = navRows.map(x => +Number(x.total_value).toFixed(2));
+  const bench = navRows.map(x => +(cap * Number(x.benchmark)).toFixed(2));
+  chart('paperChart').setOption({
+    grid:{left:12,right:20,top:24,bottom:24,containLabel:true},
+    legend:{data:['模拟总资产', '该池等权'], right:10, top:0,
+      textStyle:{color:C().axis,fontSize:11}, itemWidth:14, itemHeight:8},
+    xAxis:{type:'category', data:dates, boundaryGap:false, ...ax(),
+      axisLabel:{...ax().axisLabel, formatter:v => v.slice(0, 7)}},
+    yAxis:{type:'value', scale:true, ...ax(),
+      axisLabel:{...ax().axisLabel, formatter:v => (v / 10000).toFixed(1) + '万'}},
+    tooltip:{...tip(), valueFormatter:v => fmtMoney(v)},
+    series:[
+      {name:'模拟总资产', type:'line', data:total, smooth:true, symbol:'none',
+        lineStyle:{width:2.2, color:'#6366f1'},
+        areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[
+          {offset:0,color:'rgba(99,102,241,.28)'},{offset:1,color:'rgba(99,102,241,0)'}])}},
+      {name:'该池等权', type:'line', data:bench, smooth:true, symbol:'none',
+        lineStyle:{width:1.6, color:'#22d3ee', type:'dashed'}},
+    ],
+  }, true);
+
+  $('paperNote').textContent = '说明：按目标权重月频调仓（信号日次一交易日收盘），整手成交；'
+    + '含佣金万 2.5（最低 5 元）/ 过户费 / 卖出印花税；价格为按最新真实价位折算的后复权价，不含分红再投。';
+}
+
+async function resetPaper(){
+  if (!paperEnabled()) return;
+  if (!confirm(`确认重置 ${state.universe} 模拟账户？将清空现有成交记录并按 10 万重新建仓。`)) return;
+  const btn = $('paperResetBtn');
+  btn.disabled = true;
+  btn.textContent = '初始化中…（约 20 秒）';
+  try{
+    const r = await fetch(`/api/paper/reset?universe=${state.universe}&capital=100000`, {method:'POST'});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || d.message || ('HTTP ' + r.status));
+    await loadPaper();
+  }catch(e){
+    alert('初始化失败：' + e.message);
+  }finally{
+    btn.disabled = !paperEnabled();
+  }
+}
+$('paperResetBtn').onclick = resetPaper;
+
 function renderHeatmap(h){
   if (!h || !h.data || !h.data.length){
     $('heatTag').textContent = (h && h.date) ? `最新截面 ${h.date} · Z-Score` : '最新截面 · Z-Score';
@@ -1517,6 +1697,7 @@ function applyTheme(t){
     loadHeatmap();
     loadPortfolio();
     loadTracking();
+    loadPaper();
   }
   renderPoolCards();
 }
@@ -1530,6 +1711,7 @@ async function load(){
     loadHeatmap();
     loadPortfolio();
     loadTracking();
+    loadPaper();
   }catch(e){
     $('pagePool').insertAdjacentHTML('beforeend', `<div class="empty">加载失败：${e.message}</div>`);
   }

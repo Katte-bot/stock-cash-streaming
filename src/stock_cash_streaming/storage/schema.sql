@@ -234,6 +234,79 @@ CREATE TABLE IF NOT EXISTS fact_tracking_nav (
     PRIMARY KEY (trade_date, strategy)
 );
 
+-- ===== 模拟持仓（纸面账户）=====
+
+-- 模拟账户（每个股票池一个）
+CREATE TABLE IF NOT EXISTS fact_paper_account (
+    universe_id     TEXT PRIMARY KEY,
+    initial_capital REAL,      -- 初始资金（默认 100000）
+    cash            REAL,      -- 最新现金
+    start_date      TEXT,      -- 首个成交日
+    last_date       TEXT,      -- 最近结算日
+    total_value     REAL,      -- 最近总资产
+    rebalances      INTEGER DEFAULT 0,
+    trades_count    INTEGER DEFAULT 0,
+    created_at      TEXT,
+    updated_at      TEXT
+);
+
+-- 模拟调仓事件（回放用；backtest=历史回测权重，live=目标组合快照）
+CREATE TABLE IF NOT EXISTS fact_paper_event (
+    universe_id TEXT,
+    exec_date   TEXT,          -- 执行日（该日收盘成交）
+    symbol      TEXT,
+    weight      REAL,
+    source      TEXT,          -- backtest / live
+    created_at  TEXT,
+    PRIMARY KEY (universe_id, exec_date, symbol)
+);
+
+-- 成交流水（重建时按池删除重写）
+CREATE TABLE IF NOT EXISTS fact_paper_trade (
+    universe_id TEXT,
+    trade_date  TEXT,
+    seq         INTEGER,       -- 同日序号，保证顺序稳定
+    symbol      TEXT,
+    name        TEXT,
+    side        TEXT,          -- buy / sell
+    price       REAL,
+    shares      INTEGER,
+    amount      REAL,          -- 成交金额（不含费用）
+    fee         REAL,
+    reason      TEXT,          -- initial / rebalance
+    created_at  TEXT,
+    PRIMARY KEY (universe_id, trade_date, seq)
+);
+
+-- 当前持仓（每次重建后整体覆盖）
+CREATE TABLE IF NOT EXISTS fact_paper_position (
+    universe_id  TEXT,
+    symbol       TEXT,
+    name         TEXT,
+    shares       INTEGER,
+    avg_cost     REAL,         -- 含买入费用摊薄后的每股成本
+    last_price   REAL,
+    market_value REAL,
+    weight       REAL,         -- 占总资产比例
+    pnl          REAL,
+    updated_at   TEXT,
+    PRIMARY KEY (universe_id, symbol)
+);
+
+-- 资产曲线
+CREATE TABLE IF NOT EXISTS fact_paper_nav (
+    universe_id TEXT,
+    trade_date  TEXT,
+    total_value REAL,
+    cash        REAL,
+    market_value REAL,
+    ret         REAL,          -- 累计收益率
+    benchmark   REAL,          -- 该池等权基准（起点归一）
+    drawdown    REAL,
+    created_at  TEXT,
+    PRIMARY KEY (universe_id, trade_date)
+);
+
 -- ===== 运维表 =====
 
 -- 数据水位（驱动增量）

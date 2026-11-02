@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -265,6 +265,39 @@ def tracking(start_date: str | None = None, strategy: str = "defensive",
                                  universe_id=None if universe == "C0" else universe)
     finally:
         repo.close()
+
+
+@app.get("/api/paper")
+def paper(universe: str = "C0", trades: int = 100) -> dict:
+    """模拟持仓（纸面账户）：账户摘要 + 当前持仓 + 最近成交 + 资产曲线。"""
+    from ..strategy.paper import paper_summary
+
+    repo = open_repository()
+    try:
+        return paper_summary(repo, universe, trade_limit=max(0, min(trades, 500)))
+    finally:
+        repo.close()
+
+
+@app.post("/api/paper/reset")
+def paper_reset(universe: str = "C0", capital: float = 100000.0) -> dict:
+    """初始化 / 重置模拟账户（首次会回放历史，约 10–30 秒）。"""
+    from ..strategy.paper import MAX_CAPITAL, MIN_CAPITAL, reset_paper_account
+
+    if not (MIN_CAPITAL <= capital <= MAX_CAPITAL):
+        raise HTTPException(
+            status_code=400,
+            detail=f"初始资金需在 {MIN_CAPITAL:,.0f} ~ {MAX_CAPITAL:,.0f} 之间")
+    repo = open_repository()
+    try:
+        res = reset_paper_account(repo, universe, capital)
+    finally:
+        repo.close()
+    if res.get("status") == "busy":
+        raise HTTPException(status_code=409, detail="已有任务运行中，请稍后重试")
+    if res.get("status") == "invalid":
+        raise HTTPException(status_code=400, detail=res.get("message") or "参数不正确")
+    return res
 
 
 @app.get("/api/intraday")
