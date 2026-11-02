@@ -57,3 +57,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
         conn.execute("UPDATE dim_universe SET daily_enabled=1")
         conn.execute("PRAGMA user_version=2")
+
+    # 模拟持仓：账户表增加折算比例列（旧库补列）
+    pcols = {r["name"] for r in conn.execute("PRAGMA table_info(fact_paper_account)")}
+    if pcols and "price_scale" not in pcols:
+        conn.execute("ALTER TABLE fact_paper_account ADD COLUMN price_scale TEXT")

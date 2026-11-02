@@ -246,6 +246,7 @@ CREATE TABLE IF NOT EXISTS fact_paper_account (
     total_value     REAL,      -- 最近总资产
     rebalances      INTEGER DEFAULT 0,
     trades_count    INTEGER DEFAULT 0,
+    price_scale     TEXT,      -- JSON：后复权价 → 真实价位 的固定折算比例
     created_at      TEXT,
     updated_at      TEXT
 );

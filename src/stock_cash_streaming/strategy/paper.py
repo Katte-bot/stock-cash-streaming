@@ -6,8 +6,8 @@
 - 费用：佣金万 2.5（最低 5 元）+ 过户费万 0.1 + 卖出印花税
   （2023-08-28 前 0.1%，之后 0.05%）；
 - 先卖后买；现金不足时等比缩量，买不起 1 手的标的跳过；
-- 使用后复权收盘价（收益连续），并按最新「后复权/真实收盘」比例折算到真实价位，
-  保证 100 股整手可成交；因此不做分红/送转的股数调整。
+- 价格为后复权收盘价（收益连续、含分红），并按账户建立时固定的「后复权/真实收盘」
+  比例折算到真实价位，保证 100 股整手可成交且历史流水稳定。
 
 历史段来自 `run_backtest(return_weights=True)` 的逐日权重，实时段来自
 `fact_target_portfolio` 的调仓快照；两者统一存为 `fact_paper_event` 后回放，
@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime
 
@@ -306,7 +307,9 @@ def _price_scale(repo: Repository, symbols: list[str]) -> dict[str, float]:
             if f.get(s) and f[s] > 0 and q[s] > 0}
 
 
-def _load_prices(repo: Repository, symbols: list[str], start: str) -> pd.DataFrame:
+def _load_prices(repo: Repository, symbols: list[str], start: str,
+                 scale: dict[str, float] | None = None) -> pd.DataFrame:
+    """取后复权收盘价，并按固定比例折算到真实价位（收益连续、含分红）。"""
     if not symbols:
         return pd.DataFrame()
     ph = ",".join("?" for _ in symbols)
@@ -317,12 +320,14 @@ def _load_prices(repo: Repository, symbols: list[str], start: str) -> pd.DataFra
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame([dict(r) for r in rows])
-    pivot = df.pivot(index="trade_date", columns="symbol", values="close").sort_index().ffill()
-    # 折算到真实价位，保证 100 股整手可成交
-    for s, k in _price_scale(repo, symbols).items():
-        if s in pivot.columns and k > 0:
-            pivot[s] = pivot[s] / k
-    return pivot
+    prices = df.pivot(index="trade_date", columns="symbol",
+                      values="close").sort_index().ffill()
+    scale = scale or {}
+    for s in prices.columns:
+        k = float(scale.get(s) or 1.0)
+        if k > 0:
+            prices[s] = prices[s] / k
+    return prices
 
 
 def _benchmark(prices: pd.DataFrame) -> pd.Series | None:
@@ -350,7 +355,8 @@ def _delete_universe(repo: Repository, universe_id: str, include_events: bool = 
     repo.conn.commit()
 
 
-def _write_ledger(repo: Repository, universe_id: str, capital: float, ledger: dict) -> None:
+def _write_ledger(repo: Repository, universe_id: str, capital: float, ledger: dict,
+                  scale: dict[str, float] | None = None) -> None:
     now = _now()
     _delete_universe(repo, universe_id, include_events=False)
     repo.upsert("fact_paper_account", [{
@@ -358,6 +364,7 @@ def _write_ledger(repo: Repository, universe_id: str, capital: float, ledger: di
         "cash": ledger["cash"], "start_date": ledger["start_date"],
         "last_date": ledger["last_date"], "total_value": ledger["total_value"],
         "rebalances": ledger["rebalances"], "trades_count": len(ledger["trades"]),
+        "price_scale": json.dumps(scale or {}, ensure_ascii=False),
         "created_at": now, "updated_at": now,
     }], ["universe_id"])
 
@@ -395,7 +402,8 @@ def _names(repo: Repository, symbols: list[str]) -> dict[str, str]:
         f"SELECT symbol, name FROM dim_stock WHERE symbol IN ({ph})", tuple(symbols))}
 
 
-def _replay_and_write(repo: Repository, universe_id: str, capital: float) -> dict:
+def _replay_and_write(repo: Repository, universe_id: str, capital: float,
+                      scale: dict[str, float] | None = None) -> dict:
     rows = repo.query(
         "SELECT exec_date, symbol, weight FROM fact_paper_event "
         "WHERE universe_id=? ORDER BY exec_date", (universe_id,))
@@ -407,7 +415,20 @@ def _replay_and_write(repo: Repository, universe_id: str, capital: float) -> dic
     events = sorted(grouped.items())
 
     symbols = sorted({s for _, w in events for s in w})
-    prices = _load_prices(repo, symbols, events[0][0])
+    # 价格折算比例：首次建立后固定，保证历史流水稳定；新出现的标的再补算
+    acc = get_account(repo, universe_id)
+    if scale is None:
+        scale = {}
+        if acc and acc.get("price_scale"):
+            try:
+                scale = {k: float(v) for k, v in json.loads(acc["price_scale"]).items()}
+            except (TypeError, ValueError):
+                scale = {}
+    missing = [s for s in symbols if s not in scale]
+    if missing:
+        scale.update(_price_scale(repo, missing))
+
+    prices = _load_prices(repo, symbols, events[0][0], scale)
     if prices.empty:
         return {"status": "waiting", "universe": universe_id, "message": "等待行情数据"}
 
@@ -421,7 +442,7 @@ def _replay_and_write(repo: Repository, universe_id: str, capital: float) -> dic
     for p in ledger["positions"]:
         p["name"] = names.get(p["symbol"], "")
 
-    _write_ledger(repo, universe_id, capital, ledger)
+    _write_ledger(repo, universe_id, capital, ledger, scale)
     logger.info(f"模拟持仓 {universe_id} 已更新：{ledger['trades'].__len__()} 笔成交，"
                 f"总资产 {ledger['total_value']:,.2f}")
     return {"status": "ok", "universe": universe_id,
@@ -462,7 +483,7 @@ def _rebuild(repo: Repository, universe_id: str, capital: float) -> dict:
     } for e in events for s, w in e["weights"].items()],
         ["universe_id", "exec_date", "symbol"])
 
-    return _replay_and_write(repo, universe_id, capital)
+    return _replay_and_write(repo, universe_id, capital, _price_scale(repo, symbols))
 
 
 def rebuild_paper_account(repo: Repository, universe_id: str = C0,
