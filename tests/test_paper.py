@@ -134,5 +134,26 @@ def test_rebuild_and_reset(repo, monkeypatch):
     assert acc2["initial_capital"] == 200_000
     assert abs(acc2["total_value"] / first_total - 2) < 0.05
 
-    # 未开放的池返回未初始化
-    assert paper.paper_summary(repo, "C1")["status"] == "not_initialized"
+    # 所有池都启用：未初始化的池返回 not_initialized，但 enabled=True
+    other = paper.paper_summary(repo, "C1")
+    assert other["status"] == "not_initialized"
+    assert other["enabled"] is True
+
+
+def test_refresh_all_pools(repo, monkeypatch):
+    repo.upsert("dim_universe", [
+        {"universe_id": "C1", "name": "C1", "is_custom": 0, "daily_enabled": 1},
+        {"universe_id": "U1", "name": "自建池", "is_custom": 1, "daily_enabled": 1},
+    ], ["universe_id"])
+
+    def fake(repo_, uid):
+        if uid == "U1":
+            raise RuntimeError("boom")
+        return {"status": "ok", "universe": uid}
+
+    monkeypatch.setattr(paper, "refresh_paper_account", fake)
+    out = paper.refresh_all_paper_accounts(repo)
+    assert set(out) == {"C0", "C1", "U1"}
+    assert out["C0"]["status"] == "ok"
+    assert out["C1"]["status"] == "ok"
+    assert out["U1"]["status"] == "failed"

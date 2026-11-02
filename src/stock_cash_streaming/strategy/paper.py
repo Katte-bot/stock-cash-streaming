@@ -38,9 +38,7 @@ TRANSFER_RATE = 0.00001
 STAMP_SWITCH = "2023-08-28"
 STAMP_BEFORE, STAMP_AFTER = 0.001, 0.0005
 
-# 目前只对 C0 开放；其它池保留接口（universe_id 透传）后续扩展
-ENABLED_UNIVERSES = (C0,)
-
+# 所有股票池（内置 C0~C3 + 用户自建 U*）都启用模拟持仓
 _LOCK = threading.Lock()
 
 
@@ -462,13 +460,17 @@ def _rebuild(repo: Repository, universe_id: str, capital: float) -> dict:
         return {"status": "empty", "universe": universe_id,
                 "message": f"股票池 {universe_id} 为空"}
     symbols = list(members)
-    res = run_backtest(
-        repo, top_k=12, rebalance="monthly", hold_buffer=1.0,
-        strategy="defensive", weighting="vol_inv", vol_target=0.25,
-        universe=symbols, eligibility=eligibility_panel(repo, symbols),
-        cost_model="a_share", limit_model="board",
-        persist=False, return_weights=True,
-    )
+    try:
+        res = run_backtest(
+            repo, top_k=12, rebalance="monthly", hold_buffer=1.0,
+            strategy="defensive", weighting="vol_inv", vol_target=0.25,
+            universe=symbols, eligibility=eligibility_panel(repo, symbols),
+            cost_model="a_share", limit_model="board",
+            persist=False, return_weights=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"{universe_id} 模拟持仓回测失败: {e}")
+        return {"status": "failed", "universe": universe_id, "message": str(e)}
     events = _events_from_weights(res.get("weights"), "backtest")
     last = events[-1]["exec_date"] if events else None
     events += _events_from_snapshots(repo, universe_id, last)
@@ -526,6 +528,23 @@ def refresh_paper_account(repo: Repository, universe_id: str = C0) -> dict:
     return _replay_and_write(repo, universe_id, float(acc["initial_capital"]))
 
 
+def refresh_all_paper_accounts(repo: Repository) -> dict:
+    """每日流水线调用：为所有股票池刷新/建立模拟持仓。
+
+    单个池失败（数据不足、回测异常）只记录结果，不影响其它池。
+    """
+    ids = [r["universe_id"] for r in repo.query(
+        "SELECT universe_id FROM dim_universe ORDER BY universe_id")]
+    out: dict = {}
+    for uid in ids:
+        try:
+            out[uid] = refresh_paper_account(repo, uid)
+        except Exception as e:  # noqa: BLE001
+            logger.exception(f"模拟持仓 {uid} 刷新失败: {e}")
+            out[uid] = {"status": "failed", "universe": uid, "error": str(e)}
+    return out
+
+
 def reset_paper_account(repo: Repository, universe_id: str = C0,
                         capital: float = DEFAULT_CAPITAL) -> dict:
     """重置账户：清空该池全部模拟数据后按新资金重建。"""
@@ -539,7 +558,7 @@ def reset_paper_account(repo: Repository, universe_id: str = C0,
 def paper_summary(repo: Repository, universe_id: str = C0,
                   trade_limit: int = 100) -> dict:
     acc = get_account(repo, universe_id)
-    enabled = universe_id in ENABLED_UNIVERSES
+    enabled = True  # 所有股票池都启用模拟持仓
     if not acc:
         return {"status": "not_initialized", "universe": universe_id,
                 "enabled": enabled, "capital": DEFAULT_CAPITAL}

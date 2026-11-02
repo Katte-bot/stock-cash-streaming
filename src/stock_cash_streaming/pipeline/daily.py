@@ -105,11 +105,11 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
             "days": trc.get("days", 0),
         }
 
-        # 5.1) 模拟持仓（纸面账户，仅 C0）：追加调仓事件并重放
+        # 5.1) 模拟持仓（纸面账户）：所有池（含用户自建）追加调仓事件并重放
         try:
-            from ..strategy.paper import refresh_paper_account
+            from ..strategy.paper import refresh_all_paper_accounts
 
-            result["steps"]["paper"] = refresh_paper_account(repo, "C0")
+            result["steps"]["paper"] = refresh_all_paper_accounts(repo)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"模拟持仓更新失败: {e}")
             result["steps"]["paper"] = {"error": str(e)}

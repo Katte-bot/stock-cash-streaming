@@ -297,6 +297,8 @@ def paper_reset(universe: str = "C0", capital: float = 100000.0) -> dict:
         raise HTTPException(status_code=409, detail="已有任务运行中，请稍后重试")
     if res.get("status") == "invalid":
         raise HTTPException(status_code=400, detail=res.get("message") or "参数不正确")
+    if res.get("status") == "failed":
+        raise HTTPException(status_code=400, detail=res.get("message") or "该池暂时无法建立模拟账户")
     return res
 
 

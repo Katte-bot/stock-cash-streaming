@@ -1165,7 +1165,7 @@ const fmtMoney = v => (v === null || v === undefined || isNaN(v)) ? '--'
   : Number(v).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
 function paperEnabled(){
-  return state.universe === 'C0';
+  return !!poolOf(state.universe);
 }
 
 async function loadPaper(){
@@ -1199,11 +1199,11 @@ function renderPaper(p){
   if (!ok){
     clearPaper();
     if (!enabled){
-      $('paperTag').textContent = '未开放';
-      $('paperNote').textContent = '模拟持仓目前仅对 C0 股票池开放，其它池待 C0 运行稳定后扩展。';
+      $('paperTag').textContent = '不可用';
+      $('paperNote').textContent = '该股票池暂不可用，请从左侧导航重新选择。';
     } else {
       $('paperTag').textContent = '未初始化';
-      $('paperNote').textContent = '尚未初始化。点击右上「初始化账户」，首次会按 2018 年以来的月频调仓回放历史（约 20 秒），之后每日自动跟踪。';
+      $('paperNote').textContent = '尚未初始化。点击右上「初始化账户」，首次会按该池历史调仓回放（约 10–30 秒），之后每日自动跟踪。';
     }
     return;
   }
