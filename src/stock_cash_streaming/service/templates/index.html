@@ -287,7 +287,7 @@
     </div>
     <div class="nav-group">
       <div class="nav-title">研究</div>
-      <button class="nav-item" data-nav="nl" id="navNL">自然语言策略</button>
+      <button class="nav-item" data-nav="nl" id="navNL">策略研究</button>
     </div>
     <div class="nav-group">
       <div class="nav-title">操作</div>
@@ -540,7 +540,7 @@
     </div>
   </section>
 
-  <!-- ==================== 自然语言策略 ==================== -->
+  <!-- ==================== 策略研究 ==================== -->
   <section class="page" id="pageNL" hidden>
     <div class="grid2">
       <div class="card">
@@ -745,7 +745,7 @@ function applyView(){
   $('pagePool').hidden = !isPool;
   $('pageNL').hidden = !isNL;
   const pool = isPool ? poolOf(state.universe) : null;
-  $('pageTitle').textContent = isNL ? '自然语言策略' : (isPool ? poolLabel(state.universe) : '总览');
+  $('pageTitle').textContent = isNL ? '策略研究' : (isPool ? poolLabel(state.universe) : '总览');
   // 池详情只保留一行说明，避免标题重复
   $('pageSub').textContent = isNL
     ? '中文描述买卖条件 · LLM 解析为受控规则 · 选择股票池回测'
@@ -775,7 +775,7 @@ function applyView(){
   setTimeout(resizeCharts, 120);
 }
 
-/* ---------- 自然语言策略 ---------- */
+/* ---------- 策略研究 ---------- */
 const nlState = { spec: null, result: null };
 
 function nlFillUniverses(){
