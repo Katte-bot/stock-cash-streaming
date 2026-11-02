@@ -286,6 +286,10 @@
       <div id="navPools"></div>
     </div>
     <div class="nav-group">
+      <div class="nav-title">研究</div>
+      <button class="nav-item" data-nav="nl" id="navNL">自然语言策略</button>
+    </div>
+    <div class="nav-group">
       <div class="nav-title">操作</div>
       <button class="nav-item" data-nav="action" id="navNewPool">＋ 新建股票池</button>
     </div>
@@ -536,6 +540,73 @@
     </div>
   </section>
 
+  <!-- ==================== 自然语言策略 ==================== -->
+  <section class="page" id="pageNL" hidden>
+    <div class="grid2">
+      <div class="card">
+        <h2>描述你的策略 <span class="tag">LLM → 白名单规则</span></h2>
+        <p class="desc">用中文描述买卖条件，系统解析为受控规则（不支持任意代码）；解析后请先确认规则再回测</p>
+        <textarea class="textarea" id="nlText" rows="4" placeholder="例如：
+1. 周K线9连阴后买入并持仓1周
+2. 日K线10连阴后买入，并持仓2日
+3. 周K线 MACD 金叉后买入并持仓2周"></textarea>
+        <div class="pfbar" style="margin-top:10px">
+          <button class="btn primary" id="nlParseBtn">解析策略</button>
+          <span class="reasons" id="nlParseMsg"></span>
+        </div>
+        <div id="nlSpecBox" style="display:none">
+          <div class="report" id="nlSpecText" style="min-height:auto"></div>
+          <details style="margin-top:10px">
+            <summary class="reasons">查看 / 手动编辑 JSON</summary>
+            <textarea class="textarea" id="nlSpecJson" rows="7" style="margin-top:8px"></textarea>
+            <button class="btn" id="nlApplyJson" style="margin-top:8px">应用规则</button>
+          </details>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>回测设置 <span class="tag">选择股票池</span></h2>
+        <p class="desc">信号在 K 线收盘计算、次一交易日收盘成交；整手买入，最多同时持有 N 只</p>
+        <div class="form-row"><label class="field">股票池<select class="input" id="nlUniverse"></select></label></div>
+        <div class="form-row"><label class="field">最多同时持仓（只）<input class="input" id="nlTopN" type="number" min="1" max="20" value="5" /></label></div>
+        <div class="form-row"><label class="field">开始日期（可选）<input class="input" id="nlStart" placeholder="如 2018-01-01" /></label></div>
+        <div class="form-row"><label class="field">结束日期（可选）<input class="input" id="nlEnd" placeholder="默认最新" /></label></div>
+        <div class="pfbar">
+          <button class="btn primary" id="nlRunBtn" disabled>运行回测</button>
+          <label class="reasons" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="nlSave" /> 保存策略</label>
+        </div>
+        <div class="form-row"><label class="field">策略名称（保存时使用）<input class="input" id="nlSaveName" maxlength="40" /></label></div>
+        <div class="reasons" id="nlRunMsg"></div>
+      </div>
+    </div>
+
+    <div class="card" id="nlResultCard" style="display:none">
+      <h2>回测结果 <span class="tag" id="nlResultTag">--</span></h2>
+      <div class="pfbar" id="nlSummary"></div>
+      <div class="mgrid" id="nlMetrics"></div>
+      <div class="chart" id="nlNavChart"></div>
+      <h2 style="margin-top:16px">交易明细 <span class="tag" id="nlTradeTag">--</span></h2>
+      <div class="table-wrap" style="max-height:380px;overflow-y:auto">
+        <table>
+          <thead><tr><th>买入日</th><th>卖出日</th><th>股票</th><th class="num">买入价</th><th class="num">卖出价</th><th class="num">持有(交易日)</th><th class="num">收益</th></tr></thead>
+          <tbody id="nlTrades"></tbody>
+        </table>
+      </div>
+      <div class="pfdiff" id="nlRuleNote"></div>
+    </div>
+
+    <div class="card">
+      <h2>已保存策略 <span class="tag">最近一次回测</span></h2>
+      <p class="desc">可载入规则重跑或删除；逐笔成交不落库，每次现算</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>名称</th><th>规则</th><th>池</th><th class="num">年化</th><th class="num">胜率</th><th>最近运行</th><th>操作</th></tr></thead>
+          <tbody id="nlStrategyBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <footer>
     本系统输出均为基于历史数据的量化研究结果，不构成任何投资建议。股市有风险，入市需谨慎。<br/>
     数据来源：腾讯（行情/快照）、新浪（板块成分/个股资金流）、同花顺（板块资金流）。
@@ -647,6 +718,7 @@ function poolLabel(id){
 function parseHash(){
   const h = (location.hash || '').replace(/^#\/?/, '');
   if (h.startsWith('pool/')) return {view:'pool', pool: decodeURIComponent(h.slice(5))};
+  if (h === 'nl' || h.startsWith('nl/')) return {view:'nl', pool: state.universe};
   return {view:'overview', pool: state.universe};
 }
 function goOverview(){ location.hash = '#/overview'; }
@@ -654,9 +726,10 @@ function goPool(id){ location.hash = '#/pool/' + encodeURIComponent(id); }
 
 function setActiveNav(){
   document.querySelectorAll('.nav-item').forEach(b => {
-    if (!b.dataset.nav || b.dataset.nav === 'action'){ b.classList.remove('active'); return; }
-    const on = b.dataset.nav === 'overview'
-      ? state.view === 'overview'
+    const nav = b.dataset.nav;
+    if (!nav || nav === 'action'){ b.classList.remove('active'); return; }
+    const on = nav === 'nl' ? state.view === 'nl'
+      : nav === 'overview' ? state.view === 'overview'
       : (state.view === 'pool' && b.dataset.pool === state.universe);
     b.classList.toggle('active', on);
   });
@@ -667,12 +740,16 @@ function applyView(){
   state.view = p.view;
   if (p.view === 'pool') state.universe = p.pool || 'C0';
   const isPool = state.view === 'pool';
-  $('pageOverview').hidden = isPool;
+  const isNL = state.view === 'nl';
+  $('pageOverview').hidden = state.view !== 'overview';
   $('pagePool').hidden = !isPool;
+  $('pageNL').hidden = !isNL;
   const pool = isPool ? poolOf(state.universe) : null;
-  $('pageTitle').textContent = isPool ? poolLabel(state.universe) : '总览';
+  $('pageTitle').textContent = isNL ? '自然语言策略' : (isPool ? poolLabel(state.universe) : '总览');
   // 池详情只保留一行说明，避免标题重复
-  $('pageSub').textContent = isPool
+  $('pageSub').textContent = isNL
+    ? '中文描述买卖条件 · LLM 解析为受控规则 · 选择股票池回测'
+    : isPool
     ? [state.universe,
        pool ? `${pool.members_count} 只` : '',
        pool ? (pool.is_custom ? '自定义池（可编辑）' : '内置池（只读）') : '',
@@ -687,6 +764,9 @@ function applyView(){
     resetReport();
     load();
     loadUniverses();
+  } else if (isNL){
+    nlFillUniverses();
+    loadNLStrategies();
   } else {
     renderOverviewNumbers();
     renderPoolCards();
@@ -694,6 +774,244 @@ function applyView(){
   }
   setTimeout(resizeCharts, 120);
 }
+
+/* ---------- 自然语言策略 ---------- */
+const nlState = { spec: null, result: null };
+
+function nlFillUniverses(){
+  const sel = $('nlUniverse');
+  if (!sel) return;
+  const list = poolsState.list || [];
+  const cur = sel.value || state.universe || 'C0';
+  sel.innerHTML = list.map(p =>
+    `<option value="${p.id}">${p.is_custom ? p.name : p.id}（${p.members_count ?? 0} 只）</option>`
+  ).join('');
+  if (list.some(p => p.id === cur)) sel.value = cur;
+  else if (list.length) sel.value = list[0].id;
+}
+
+function nlApplySpec(spec, describe){
+  nlState.spec = spec || null;
+  $('nlSpecBox').style.display = spec ? 'block' : 'none';
+  $('nlSpecJson').value = spec ? JSON.stringify(spec, null, 2) : '';
+  $('nlSpecText').innerHTML = (describe || []).map(x => `<div>${x}</div>`).join('');
+  $('nlRunBtn').disabled = !spec;
+  if (spec && spec.name && !$('nlSaveName').value) $('nlSaveName').value = spec.name;
+}
+
+async function nlParse(){
+  const text = ($('nlText').value || '').trim();
+  if (!text){ $('nlParseMsg').textContent = '请先输入策略描述'; return; }
+  $('nlParseBtn').disabled = true;
+  $('nlParseMsg').textContent = '解析中…';
+  try{
+    const r = await fetch('/api/nl/parse', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    nlApplySpec(d.spec, d.describe);
+    $('nlParseMsg').textContent = '解析成功，请确认下方规则后回测';
+  }catch(e){
+    $('nlParseMsg').textContent = '解析失败：' + e.message;
+  }finally{
+    $('nlParseBtn').disabled = false;
+  }
+}
+
+function nlApplyJson(){
+  let spec;
+  try{
+    spec = JSON.parse($('nlSpecJson').value || '');
+  }catch(e){
+    $('nlParseMsg').textContent = 'JSON 语法错误：' + e.message;
+    return;
+  }
+  if (!spec || !spec.timeframe || !spec.entry || !Array.isArray(spec.entry.all)){
+    $('nlParseMsg').textContent = '规则结构不完整：需要 timeframe、entry.all、hold_days';
+    return;
+  }
+  nlApplySpec(spec, [`周期：${spec.timeframe === 'W' ? '周线' : '日线'}`,
+                     `持仓：${spec.hold_days} 个交易日`,
+                     '条件数量：' + spec.entry.all.length + '（详细描述回测后由服务端生成）']);
+  $('nlParseMsg').textContent = '规则已应用（回测时由服务端校验）';
+}
+
+async function nlRun(){
+  if (!nlState.spec){ $('nlRunMsg').textContent = '请先解析或应用规则'; return; }
+  const universe = $('nlUniverse').value || 'C0';
+  const topN = parseInt($('nlTopN').value, 10) || 5;
+  const save = $('nlSave').checked;
+  const name = ($('nlSaveName').value || '').trim();
+  $('nlRunBtn').disabled = true;
+  $('nlRunMsg').textContent = '回测中（首次读取行情可能较慢）…';
+  try{
+    const r = await fetch('/api/nl/backtest', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        spec: nlState.spec, universe, top_n: topN,
+        start: ($('nlStart').value || '').trim() || null,
+        end: ($('nlEnd').value || '').trim() || null,
+        save, name: name || null,
+        nl_text: ($('nlText').value || '').trim() || null
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    renderNL(d);
+    $('nlRunMsg').textContent = d.saved
+      ? `回测完成，已保存为 ${d.saved.strategy_id}`
+      : '回测完成';
+    if (d.saved) loadNLStrategies();
+  }catch(e){
+    $('nlRunMsg').textContent = '回测失败：' + e.message;
+  }finally{
+    $('nlRunBtn').disabled = false;
+  }
+}
+
+function renderNL(res){
+  nlState.result = res;
+  $('nlResultCard').style.display = 'block';
+  const p = res.params || {}, m = res.metrics || {}, ts = res.trade_stats || {};
+  $('nlResultTag').textContent =
+    `${res.universe} · ${p.timeframe === 'W' ? '周线' : '日线'} · 持仓 ${p.hold_days} 日`;
+  $('nlSummary').innerHTML = (res.describe || []).map(x => `<span class="tag">${x}</span>`).join('');
+  const items = [
+    ['总收益', fmtPct((m.total_return ?? 0) * 100), cls(m.total_return)],
+    ['年化收益', fmtPct((m.annual_return ?? 0) * 100), cls(m.annual_return)],
+    ['年化超额', m.excess_annual == null ? '--' : fmtPct(m.excess_annual * 100), cls(m.excess_annual)],
+    ['夏普', m.sharpe == null ? '--' : Number(m.sharpe).toFixed(2), ''],
+    ['最大回撤', fmtPct((m.max_drawdown ?? 0) * 100), 'down'],
+    ['交易笔数', ts.trades ?? 0, ''],
+    ['胜率', fmtPct((ts.win_rate ?? 0) * 100), ''],
+    ['平均持有', (ts.avg_hold_days ?? 0).toFixed(1) + ' 日', ''],
+  ];
+  $('nlMetrics').innerHTML = items.map(([k,v,c]) =>
+    `<div class="m"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+
+  const nav = res.nav || [];
+  if (nav.length > 1){
+    const base = nav[0].nav || 1, bbase = nav[0].benchmark || base;
+    chart('nlNavChart').setOption({
+      grid:{left:12,right:20,top:24,bottom:24,containLabel:true},
+      legend:{data:['策略','基准'],right:10,top:0,textStyle:{color:C().axis,fontSize:11},itemWidth:14,itemHeight:8},
+      xAxis:{type:'category',data:nav.map(x=>x.trade_date),boundaryGap:false,...ax(),
+             axisLabel:{...ax().axisLabel,formatter:v=>v.slice(0,7)}},
+      yAxis:{type:'value',scale:true,...ax(),axisLabel:{...ax().axisLabel,formatter:v=>v.toFixed(2)}},
+      tooltip:tip(),
+      series:[
+        {name:'策略',type:'line',smooth:true,symbol:'none',
+         data:nav.map(x=> +(x.nav/base).toFixed(4)),
+         lineStyle:{width:2.2,color:'#6366f1'},
+         areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(99,102,241,.28)'},{offset:1,color:'rgba(99,102,241,0)'}])}},
+        {name:'基准',type:'line',smooth:true,symbol:'none',
+         data:nav.map(x=> +((x.benchmark ?? base)/bbase).toFixed(4)),
+         lineStyle:{width:1.6,color:'#22d3ee',type:'dashed'}}
+      ]
+    }, true);
+  } else if (charts['nlNavChart']){
+    charts['nlNavChart'].clear();
+  }
+
+  const trades = (res.trades || []).slice().reverse();
+  $('nlTradeTag').textContent =
+    `${res.trades ? res.trades.length : 0} 笔${res.open_positions ? ` · 在持 ${res.open_positions}` : ''}`;
+  $('nlTrades').innerHTML = trades.slice(0, 300).map(t => `
+    <tr>
+      <td>${t.entry_date}</td>
+      <td>${t.exit_date}</td>
+      <td>${t.symbol}</td>
+      <td class="num">${t.entry_price}</td>
+      <td class="num">${t.exit_price}</td>
+      <td class="num">${t.hold_days}</td>
+      <td class="num ${cls(t.pnl)}">${fmtPct(t.pnl * 100)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="empty">区间内没有满足条件的交易</td></tr>';
+  $('nlRuleNote').textContent = trades.length
+    ? '信号在 K 线收盘后确认，次一交易日收盘成交；已计入佣金、过户费、印花税与滑点；涨停不可买、跌停不可卖。'
+    : '未产生交易：可放宽条件、延长区间或检查股票池成员是否有足够历史数据。';
+  setTimeout(() => { if (charts['nlNavChart']) charts['nlNavChart'].resize(); }, 60);
+}
+
+async function loadNLStrategies(){
+  try{
+    const r = await fetch('/api/nl/strategies', {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    const items = d.items || [];
+    $('nlStrategyBody').innerHTML = items.map(s => {
+      const ls = s.last_summary || {};
+      return `<tr>
+        <td>${s.name || s.strategy_id}<span class="sym">${s.strategy_id}</span></td>
+        <td class="reasons">${(s.describe || []).join('；') || '--'}</td>
+        <td>${poolLabel(ls.universe || s.universe_id || '')}</td>
+        <td class="num ${cls(ls.annual_return)}">${ls.annual_return == null ? '--' : fmtPct(ls.annual_return * 100)}</td>
+        <td class="num">${ls.win_rate == null ? '--' : fmtPct(ls.win_rate * 100)}</td>
+        <td>${(s.last_run_at || '').slice(0, 16).replace('T', ' ')}</td>
+        <td>
+          <button class="icon-btn" onclick="nlLoadStrategy('${s.strategy_id}')">载入</button>
+          <button class="icon-btn" onclick="nlRerun('${s.strategy_id}')">重跑</button>
+          <button class="icon-btn" onclick="nlDelete('${s.strategy_id}')">删除</button>
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" class="empty">暂无已保存策略</td></tr>';
+  }catch(e){
+    $('nlStrategyBody').innerHTML = `<tr><td colspan="7" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+async function nlLoadStrategy(id){
+  try{
+    const r = await fetch('/api/nl/strategies/' + encodeURIComponent(id), {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    if (d.nl_text) $('nlText').value = d.nl_text;
+    if (d.universe_id) $('nlUniverse').value = d.universe_id;
+    $('nlSaveName').value = d.name || '';
+    nlApplySpec(d.spec, d.describe);
+    $('nlParseMsg').textContent = `已载入 ${d.strategy_id}，可直接重跑`;
+    window.scrollTo({top:0, behavior:'smooth'});
+  }catch(e){
+    $('nlParseMsg').textContent = '载入失败：' + e.message;
+  }
+}
+
+async function nlRerun(id){
+  const universe = $('nlUniverse').value || 'C0';
+  const topN = parseInt($('nlTopN').value, 10) || 5;
+  $('nlRunMsg').textContent = `正在重跑 ${id}…`;
+  try{
+    const r = await fetch(
+      `/api/nl/strategies/${encodeURIComponent(id)}/run`
+      + `?universe=${encodeURIComponent(universe)}&top_n=${topN}`,
+      {method:'POST'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    renderNL(d);
+    $('nlRunMsg').textContent = `已重跑 ${id}`;
+    loadNLStrategies();
+  }catch(e){
+    $('nlRunMsg').textContent = '重跑失败：' + e.message;
+  }
+}
+
+async function nlDelete(id){
+  if (!confirm(`确认删除策略 ${id}？`)) return;
+  try{
+    const r = await fetch('/api/nl/strategies/' + encodeURIComponent(id), {method:'DELETE'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    loadNLStrategies();
+  }catch(e){
+    $('nlRunMsg').textContent = '删除失败：' + e.message;
+  }
+}
+
+$('navNL').onclick = () => { location.hash = '#/nl'; };
+$('nlParseBtn').onclick = nlParse;
+$('nlApplyJson').onclick = nlApplyJson;
+$('nlRunBtn').onclick = nlRun;
 
 function toggleSec(id){
   const el = $(id);
@@ -1699,6 +2017,7 @@ function applyTheme(t){
     loadTracking();
     loadPaper();
   }
+  if (state.view === 'nl' && nlState.result) renderNL(nlState.result);
   renderPoolCards();
 }
 $('themeBtn').onclick = () => applyTheme(theme() === 'dark' ? 'light' : 'dark');

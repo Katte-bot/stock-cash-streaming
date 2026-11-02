@@ -377,6 +377,59 @@ def _cmd_paper(args) -> None:
               f"{p['last_price']:.3f} = {p['market_value']:,.2f}（{p['weight']:.1%}）")
 
 
+def _cmd_nl(args) -> None:
+    import json
+
+    from .research.nl_rules import (
+        SpecError,
+        StrategyParseError,
+        parse_nl_strategy,
+        run_nl_backtest,
+        save_strategy,
+    )
+
+    repo = open_repository()
+    try:
+        if args.spec_file:
+            with open(args.spec_file, encoding="utf-8") as f:
+                spec = json.load(f)
+        elif args.text:
+            print("解析自然语言策略…")
+            spec = parse_nl_strategy(args.text)
+        else:
+            print("请提供 --text 或 --spec-file")
+            return
+        res = run_nl_backtest(repo, spec, args.universe, top_n=args.top_n)
+        if args.save:
+            saved = save_strategy(repo, res["spec"], args.text or "", args.universe, res)
+            print(f"已保存策略：{saved['strategy_id']} · {saved['name']}")
+    except (SpecError, StrategyParseError) as e:
+        print(f"失败：{e}")
+        return
+    except OSError as e:
+        print(f"读取 spec 文件失败：{e}")
+        return
+    finally:
+        repo.close()
+
+    m, ts = res["metrics"], res["trade_stats"]
+    print("\n===== 自然语言策略回测 =====")
+    print(f"策略      : {res['spec']['name']}（{res['universe']}）")
+    for line in res["describe"]:
+        print(f"  · {line}")
+    print(f"区间      : {res['params']['start']} ~ {res['params']['end']}")
+    print(f"累计收益  : {m.get('total_return', 0):.2%}")
+    print(f"年化收益  : {m.get('annual_return', 0):.2%}")
+    print(f"夏普/回撤 : {m.get('sharpe', 0):.2f} / {m.get('max_drawdown', 0):.2%}")
+    print(f"交易      : {ts.get('trades', 0)} 笔，胜率 {ts.get('win_rate', 0):.1%}，"
+          f"平均持有 {ts.get('avg_hold_days', 0):.1f} 个交易日")
+    if res["trades"]:
+        print("\n最近 5 笔交易：")
+        for t in res["trades"][-5:]:
+            print(f"  {t['entry_date']} 买 → {t['exit_date']} 卖  {t['symbol']}  "
+                  f"{t['hold_days']} 日  {t['pnl']:+.2%}")
+
+
 def _cmd_daily(args) -> None:
     from .pipeline.daily import run_daily_pipeline
 
@@ -859,6 +912,14 @@ def main(argv: list[str] | None = None) -> None:
     p_pp.add_argument("--capital", type=float, default=100000.0, help="初始资金（默认 100000）")
     p_pp.add_argument("--reset", action="store_true", help="清空并按当前组合重建账户")
     p_pp.set_defaults(func=_cmd_paper)
+
+    p_nl = sub.add_parser("nl", help="自然语言策略：LLM 解析为 DSL 后回测")
+    p_nl.add_argument("--text", default=None, help="自然语言策略描述")
+    p_nl.add_argument("--spec-file", default=None, help="直接指定 DSL JSON 文件（无 LLM 时用）")
+    p_nl.add_argument("--universe", default="C0", help="股票池 ID")
+    p_nl.add_argument("--top-n", type=int, default=5, help="最多同时持仓数（默认 5）")
+    p_nl.add_argument("--save", action="store_true", help="保存策略与最近结果")
+    p_nl.set_defaults(func=_cmd_nl)
 
     p_daily = sub.add_parser("daily", help="每日自动流水线（增量→因子→信号→组合→跟踪）")
     p_daily.add_argument("--force", action="store_true", help="非交易日/行情未更新时也强制执行")

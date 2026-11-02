@@ -188,6 +188,8 @@ curl -s http://localhost:8000/api/tracking | head -c 400
 | 时间偏 8 小时 | 服务器时区不是 Asia/Shanghai | `sudo timedatectl set-timezone Asia/Shanghai` |
 | 同一天重跑 `task_log` 时间没变 | `task_id=daily_YYYYMMDD` 只更新状态，保留首次 `started_at` | 预期行为 |
 | 目标组合日期不是最新交易日 | 最新日滚动因子为空（历史 `pct_chg` 有缺口） | 跑 `cli recover --lookback 30` 补齐后重算 |
+| 自然语言策略「解析失败」 | 未配置 LLM（`OPENAI_API_KEY`），或模型返回了白名单外的指标 | 展开「手动编辑 JSON」直接回测；或在服务器上用 `cli nl --spec-file spec.json --universe C0` |
+| 策略回测提示「股票池为空 / 无行情数据」 | 池成员未拉取行情，或区间不足 30 个交易日 | 先在池详情点「启动/更新」，再重跑；缩短条件或放宽区间 |
 
 ---
 
@@ -249,3 +251,4 @@ PY
 |---|---|
 | 2026-10-20 | 首版：新增 `cli recover`、中断恢复流程、备份与常见问题 |
 | 2026-10-29 | 补充池任务（自定义股票池）状态查看与重试说明 |
+| 2026-11-02 | 模拟持仓（`/api/paper`）与自然语言策略（`/api/nl`）的排查条目 |

@@ -308,6 +308,20 @@ CREATE TABLE IF NOT EXISTS fact_paper_nav (
     PRIMARY KEY (universe_id, trade_date)
 );
 
+-- ===== 自然语言策略（LLM → 白名单 DSL）=====
+
+CREATE TABLE IF NOT EXISTS dim_nl_strategy (
+    strategy_id  TEXT PRIMARY KEY,   -- NL1, NL2...
+    name         TEXT,
+    nl_text      TEXT,               -- 用户原始描述
+    spec_json    TEXT,               -- 归一化后的 DSL
+    universe_id  TEXT,               -- 最近一次回测的股票池
+    last_result  TEXT,               -- JSON 摘要（年化/胜率/回撤/交易数等）
+    last_run_at  TEXT,
+    created_at   TEXT,
+    updated_at   TEXT
+);
+
 -- ===== 运维表 =====
 
 -- 数据水位（驱动增量）

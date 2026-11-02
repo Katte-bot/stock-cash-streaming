@@ -761,6 +761,40 @@ python -m stock_cash_streaming.cli experiments --universe C0
 
 **已知问题**：① 行情与信号里的「收盘价」列仍展示后复权价（如大众公用 934.08），与 ③ 的真实价位不同口径，属历史遗留展示问题，未在本次改动范围内。
 
+### 22.18 自然语言策略（2026-11-02）
+
+**目标**：用户在左侧「研究 → 自然语言策略」用中文描述规则（如「周K线9连阴后买入并持仓1周」），LLM 解析为**白名单 DSL**（不生成、不执行代码），选择股票池后回测，并保存策略与最近一次结果。
+
+**DSL（`research/nl_rules.py`）**：
+```json
+{"name":"周线9连阴","timeframe":"W",
+ "entry":{"all":[{"indicator":"consecutive_down","params":{"n":9}}]},
+ "hold_days":5}
+```
+- 指标闭集 10 个：`consecutive_down/up`、`macd_cross`、`ma_cross`、`rsi`、`return_pct`、`close_vs_ma`、`boll`、`volume_shrink`；条件最多 5 个，语义为「全部满足」（`all`），暂不支持 OR 嵌套；
+- `hold_days` 1~60，按交易日计（1 周 = 5 日，2 周 = 10 日）；
+- `validate_spec` 做类型、区间、枚举归一化，非法即 `SpecError`（API 400）。
+
+**执行口径**（与现有回测/纸面账户一致）：
+- 日线或周线（`W-FRI` 重采样，周线 bar 的标签取该周最后交易日）；信号在 K 线收盘确认，**次一交易日收盘成交**；
+- 每只目标金额 = 初始资金 / `top_n`，整手 100 股买入；最多同时持有 `top_n` 只，同日多信号按代码升序取前 N（可复现）；
+- 到期（持有 `hold_days` 个交易日）按收盘卖出，跌停顺延；涨停不可买；
+- 复用 `eligibility_panel`（ST/停牌/新股）与 `_a_share_rates`（佣金 + 过户费 + 印花税 + 滑点）。
+
+**LLM**：复用 `OPENAI_API_KEY / OPENAI_BASE_URL / LLM_MODEL`，`response_format={"type":"json_object"}`，temperature=0；未配置时 `/api/nl/parse` 返回 503，页面可展开「手动编辑 JSON」直接回测；LLM 返回非 JSON 或非法指标统一转 `StrategyParseError`（503）。
+
+**存储**：`dim_nl_strategy`（`strategy_id NL1…`、`name`、`nl_text`、`spec_json`、`universe_id`、`last_result` 摘要、`last_run_at`）。只存策略与最近一次摘要，逐笔成交每次现算，不落库。
+
+**接口/命令**：
+- `POST /api/nl/parse`、`POST /api/nl/backtest`（`save=true` 落库）、`GET /api/nl/strategies`、`GET/DELETE /api/nl/strategies/{id}`、`POST /api/nl/strategies/{id}/run?universe=&top_n=`；
+- `cli nl --text "…" --universe C0 [--save]` 或 `cli nl --spec-file spec.json --universe C1`（无 LLM 时用于验收/排查）。
+
+**页面**：`#/nl`，两栏（策略描述 + 回测设置），结果区含 KPI（累计/年化/超额/夏普/回撤/笔数/胜率/平均持有）、策略 vs 该池等权净值曲线、最近 300 笔交易，底部「已保存策略」（载入 / 重跑 / 删除）。
+
+**验收（2026-11-02）**：`pytest` 40 项通过；CLI 周线 9 连阴（C0，2018-01-02~2026-11-02）27 笔、胜率 55.6%、年化 0.39%；API 冒烟（保存 → 详情 → 重跑 → 删除）全部 200；浏览器实测「解析 → 回测」成功，LLM 返回 `timeframe=W, n=9, hold_days=5`。
+
+**局限**：仅 `all` 组合、无参数优化/策略对比/组合级仓位管理；周线重采样不含节假日对齐；结果依赖后复权行情与整手约束。
+
 
 
 
