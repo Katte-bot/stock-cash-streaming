@@ -59,6 +59,13 @@ def _load_quotes(repo: Repository) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataF
     close = df.pivot(index="trade_date", columns="symbol", values="close").sort_index()
     pct = df.pivot(index="trade_date", columns="symbol", values="pct_chg").sort_index()
     ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
+    # 数据质量：A 股单日涨跌幅上限 20%，出现 |日收益| > 50% 视为复权基准混用的价格断点，
+    # 整只剔除（下游所有矩阵都会 reindex 到 close.columns，直接删列是安全的）。
+    bad = (ret.abs() > 0.5).any(axis=0)
+    if bad.any():
+        keep = [c for c in close.columns if c not in set(ret.columns[bad])]
+        logger.warning(f"回测剔除价格异常标的 {int(bad.sum())} 只（日收益 > 50%）")
+        close, pct, ret = close[keep], pct[keep], ret[keep]
     return close, ret, pct
 
 

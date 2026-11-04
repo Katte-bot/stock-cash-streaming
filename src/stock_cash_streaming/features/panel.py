@@ -182,6 +182,18 @@ def load_panel(repo: Repository, universe: str | None = None,
     close = close.ffill()
 
     ret = close.pct_change().replace([np.inf, -np.inf], np.nan).astype("float32")
+
+    # 数据质量：A 股单日涨跌幅上限为 20%（新股首日无前收盘，收益率为 NaN），
+    # 出现 |日收益| > 50% 说明复权基准混用等价格断点，整只剔除，避免污染回测与因子。
+    bad = (ret.abs() > 0.5).any(axis=0)
+    if bad.any():
+        keep = list(ret.columns[~bad])
+        logger.warning(
+            f"剔除价格异常标的 {int(bad.sum())} 只（日收益 > 50%）："
+            f"{', '.join(list(ret.columns[bad])[:8])}…")
+        close, pct = close[keep], pct[keep]
+        amount, turnover, volume = amount[keep], turnover[keep], volume[keep]
+        op, high, low, ret = op[keep], high[keep], low[keep], ret[keep]
     st_symbols = {r["symbol"] for r in repo.query("SELECT symbol, name FROM dim_stock")
                   if "ST" in (r["name"] or "") or "退" in (r["name"] or "")}
     eligibility = _eligibility(repo, close, st_symbols, min_listed_days)

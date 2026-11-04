@@ -432,12 +432,11 @@ def _cmd_nl(args) -> None:
 
 def _cmd_market(args) -> None:
     """全 A 数据底座：股票列表、行情回填、行业、指数、财务报表。"""
-    import socket
+    from .ingest import full_market, income, index_quote, industry, statements
+    from .ingest.net import install_default_timeout
 
-    from .ingest import full_market, index_quote, industry, statements
-
-    # 数据源偶发长连接不返回：给套接字兜底超时，避免单只股票卡死整个回填
-    socket.setdefaulttimeout(45)
+    # 数据源偶发长连接不返回：给 requests 兜底超时，避免单只股票卡死整个回填
+    install_default_timeout(60)
 
     repo = open_repository()
     try:
@@ -466,6 +465,13 @@ def _cmd_market(args) -> None:
             print(statements.sync_statements(
                 repo, limit=args.stmt_limit, only_missing=args.only_missing,
                 workers=max(1, args.workers // 2),
+            ))
+
+        if args.income:
+            print("同步利润表关键科目（业绩报表，按报告期批量）…")
+            print(income.sync_income_reports(
+                repo, start_year=args.income_since, force=args.income_force,
+                workers=args.income_workers,
             ))
 
         if args.events:
@@ -1075,6 +1081,10 @@ def main(argv: list[str] | None = None) -> None:
     p_mkt.add_argument("--industry", action="store_true", help="同步申万行业分类")
     p_mkt.add_argument("--index", action="store_true", help="同步指数行情（沪深300/中证500/1000/全指）")
     p_mkt.add_argument("--statements", action="store_true", help="回填现金流量表/资产负债表关键科目")
+    p_mkt.add_argument("--income", action="store_true", help="回填利润表关键科目（业绩报表，按报告期批量）")
+    p_mkt.add_argument("--income-since", type=int, default=2015, help="利润表起始年份（默认 2015）")
+    p_mkt.add_argument("--income-force", action="store_true", help="忽略水位，重拉全部报告期")
+    p_mkt.add_argument("--income-workers", type=int, default=4, help="利润表并发抓取线程数（默认 4）")
     p_mkt.add_argument("--events", action="store_true", help="回填财报事件（SUE/营收惊喜/公告日收益）")
     p_mkt.add_argument("--members", action="store_true", help="记录池成员月度快照")
     p_mkt.add_argument("--stmt-limit", type=int, default=None, help="本次财报回填的股票数上限")

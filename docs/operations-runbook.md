@@ -165,7 +165,11 @@ nohup .venv/bin/python -m stock_cash_streaming.cli market \
 nohup .venv/bin/python -m stock_cash_streaming.cli market \
       --statements --only-missing --workers 20 > logs/statements.log 2>&1 &
 
-# 5) 查看覆盖度（命令末尾会自动打印）
+# 4.1) 利润表关键科目（业绩报表，按报告期批量：47 个季度约 1.5–2 小时）
+nohup .venv/bin/python -m stock_cash_streaming.cli market \
+      --income --income-since 2015 > logs/income.log 2>&1 &
+
+# 5) 查看覆盖度（命令末尾会自动打印；含 income_coverage）
 .venv/bin/python -m stock_cash_streaming.cli market --index
 
 # 6) 财报事件（SUE/营收惊喜/公告日收益）与池成员月度快照
@@ -184,6 +188,7 @@ nohup .venv/bin/python -m stock_cash_streaming.cli market \
 - 因子 IC 走 `cli strat ic --universe A0`，落 `fact_factor_ic`；`cli strat meta` 会把权重写 `fact_strategy_weight`、市场状态写 `fact_regime_state`、成员快照写 `dim_universe_member_history`；
 - 研究策略绑定到股票池后（池详情「策略配置条」），池任务会按 `{strategy_id}_{pool}` 写目标组合快照，并自动刷新跟踪净值与模拟账户；
 - 日志：`logs/market_backfill.log`、`logs/statements.log`；两个任务都会写 SQLite，尽量避让 `daily/recover`。
+- 财务口径补齐：利润表只入 `revenue/net_profit/eps/bps/roe/ocf_ps`（`src='em:yjbb'`，按报告期批量、`pub_date` 取最新公告日期）；因子层再派生 `equity = total_assets - total_liabilities`、`shares = equity/bps`（缺失时用 `net_profit/eps`）、`ocf = ocf_ps × shares`，因此全 A 都能算估值与现金流类因子。`--income-force` 可忽略水位重拉全部报告期。
 
 ---
 

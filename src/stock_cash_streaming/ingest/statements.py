@@ -128,6 +128,10 @@ def sync_statements(repo: Repository, symbols: list[str] | None = None,
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    from .net import install_default_timeout
+
+    install_default_timeout(60)
+
     if symbols is None:
         symbols = [r["symbol"] for r in repo.query("SELECT symbol FROM dim_stock ORDER BY symbol")]
     if only_missing:
@@ -187,8 +191,18 @@ def coverage(repo: Repository) -> dict:
     covered = repo.query(
         "SELECT COUNT(DISTINCT symbol) AS n FROM fact_financial WHERE metric='total_assets'"
     )[0]["n"]
+    income = repo.query(
+        "SELECT COUNT(DISTINCT symbol) AS n FROM fact_financial WHERE metric='net_profit'"
+    )[0]["n"]
+    ocf = repo.query(
+        "SELECT COUNT(DISTINCT symbol) AS n FROM fact_financial "
+        "WHERE metric='ocf' OR metric='ocf_ps'"
+    )[0]["n"]
     return {
         "symbols_total": int(total),
         "symbols_covered": int(covered or 0),
         "coverage": round((covered or 0) / total, 4) if total else 0.0,
+        "income_covered": int(income or 0),
+        "income_coverage": round((income or 0) / total, 4) if total else 0.0,
+        "ocf_covered": int(ocf or 0),
     }

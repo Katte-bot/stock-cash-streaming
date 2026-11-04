@@ -133,6 +133,35 @@ def test_v5_report_frame_metrics(repo):
     assert np.isfinite(last["accruals"])
 
 
+def test_report_panel_derives_income_metrics(repo):
+    """只入利润表/资产负债表科目时，净资产、股本、经营现金流应能派生。"""
+    rows = []
+    for i in range(8):
+        year, q = 2024 + i // 4, i % 4 + 1
+        mmdd = {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}[q]
+        stat = f"{year}-{mmdd}"
+        pub = (pd.Timestamp(stat) + pd.Timedelta(days=40)).strftime("%Y-%m-%d")
+        revenue = 1000.0 * q                  # 年内累计
+        net_profit = revenue * 0.1
+        assets = 10000.0 * (1 + 0.02 * i)
+        base = {"symbol": "600001", "stat_date": stat, "pub_date": pub,
+                "src": "test", "fetched_at": "2026-01-01 00:00:00"}
+        for metric, value in {
+            "revenue": revenue, "net_profit": net_profit, "eps": net_profit / 1000.0,
+            "ocf_ps": net_profit / 1000.0 * 1.2, "total_assets": assets,
+            "total_liabilities": assets * 0.4, "capex": revenue * 0.05,
+        }.items():
+            rows.append({**base, "metric": metric, "value": value})
+    repo.upsert("fact_financial", rows, ["symbol", "stat_date", "metric"])
+
+    wide = _report_frame(repo, ["600001"])
+    last = wide.iloc[-1]
+    assert last["equity"] == pytest.approx(last["total_assets"] * 0.6, rel=1e-6)
+    assert last["shares"] == pytest.approx(1000.0, rel=1e-3)
+    assert last["ocf_ttm"] == pytest.approx(last["net_profit_ttm"] * 1.2, rel=1e-3)
+    assert last["accruals"] < 0
+
+
 def test_v5_align_uses_publication_date():
     dates = pd.Index(["2024-04-25", "2024-04-30", "2024-05-06", "2024-05-10"])
     rep = pd.DataFrame({

@@ -127,6 +127,10 @@ def backfill_quotes(repo: Repository, start_date: str = DEFAULT_START,
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    from .net import install_default_timeout
+
+    install_default_timeout(60)
+
     end_date = end_date or _today()
     ds = ds or get_source()
     if symbols is None:

@@ -12,7 +12,7 @@ from ..backtest.engine import DEFAULT_COST_RATE, run_backtest
 from ..backtest.metrics import compute_metrics
 from ..common.logging import logger
 from ..features.cache import load_cached_factors
-from ..research.pool_admin import portfolio_target_name
+from ..research.pool_admin import portfolio_target_name, pool_strategy_id
 from ..storage.repository import Repository
 from ..strategy.registry import ensure_registered, get as get_strategy, sync_to_db
 from .scorecard import score_strategy
@@ -181,7 +181,9 @@ def run_strategy(repo: Repository, strategy_id: str, universe: str = "A0",
                 f" 夏普 {res['metrics'].get('sharpe', 0):.2f} 评分 {scorecard['score']}")
 
     pool_sync: dict = {}
-    if persist and universe and universe != "A0" and strategy_id != "defensive":
+    # 只在该池已绑定此策略时同步池级目标组合，避免研究试跑覆盖池的模拟持仓
+    if (persist and universe and universe != "A0" and strategy_id != "defensive"
+            and pool_strategy_id(repo, universe) == strategy_id):
         pool_sync = _sync_pool_outputs(repo, universe, strategy_id, res)
 
     dd = (nav / nav.cummax() - 1).fillna(0.0)

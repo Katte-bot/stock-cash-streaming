@@ -172,11 +172,15 @@ nohup .venv/bin/python -m stock_cash_streaming.cli market \
 nohup .venv/bin/python -m stock_cash_streaming.cli market \
       --statements --only-missing --workers 20 > logs/statements.log 2>&1 &
 
-# 覆盖度自检
+# 利润表关键科目（业绩报表，按报告期批量：47 期约 25 分钟）
+nohup .venv/bin/python -m stock_cash_streaming.cli market \
+      --income --income-since 2015 --income-workers 5 > logs/income.log 2>&1 &
+
+# 覆盖度自检（含 income_coverage）
 .venv/bin/python -m stock_cash_streaming.cli market --index
 ```
 
-> 研究因子按需计算并缓存到 `data/research_cache/`（TTL 7 天），不落 SQLite；删目录即强制重算。
+> 研究因子按需计算并缓存到 `data/research_cache/`（TTL 7 天），不落 SQLite；删目录即强制重算。缓存不会自动清理旧数据版本，重算后旧文件会在下次写缓存时按前缀清理。
 
 ### 1.5 放行端口
 

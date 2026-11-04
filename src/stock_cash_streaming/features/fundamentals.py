@@ -68,15 +68,49 @@ def _rolling(group: pd.Series, n: int, min_periods: int, how: str = "sum") -> pd
 
 
 def _report_panel(fin: pd.DataFrame) -> pd.DataFrame:
-    """把长表转成报告期宽表，并派生 TTM 指标。"""
+    """把长表转成报告期宽表，并派生 TTM 指标。
+
+    注意：同一 `(symbol, stat_date)` 的指标可能来自不同数据源、公告日不同
+    （如利润表取业绩报表日、资产负债表取年报披露日），必须先按报告期合并，
+    否则同一报告期会拆成多行，TTM 的 `rolling(4)` 因行错位而失效。
+    `pub_date` 取该报告期各指标公告日的最大值（全部可见才使用，偏保守）。
+    """
     if fin.empty:
         return pd.DataFrame()
     wide = fin.pivot_table(
-        index=["symbol", "stat_date", "pub_date"], columns="metric", values="value"
+        index=["symbol", "stat_date"], columns="metric", values="value", aggfunc="last"
     ).reset_index()
+    pubs = (fin.dropna(subset=["pub_date"])
+               .groupby(["symbol", "stat_date"])["pub_date"].max()
+               .reset_index())
+    wide = wide.merge(pubs, on=["symbol", "stat_date"], how="left")
     wide = wide.sort_values(["symbol", "stat_date"]).reset_index(drop=True)
     wide["year"] = wide["stat_date"].str[:4]
     wide["quarter"] = wide["stat_date"].str[5:7].map({"03": 1, "06": 2, "09": 3, "12": 4})
+
+    # --- 口径补齐（全 A 覆盖）---
+    # 净资产：资产负债表「资产总计 - 负债合计」（归母口径缺失时的等价近似）
+    if {"total_assets", "total_liabilities"} <= set(wide.columns):
+        derived_eq = wide["total_assets"].astype(float) - wide["total_liabilities"].astype(float)
+        wide["equity"] = (wide["equity"].where(wide["equity"].notna(), derived_eq)
+                          if "equity" in wide.columns else derived_eq)
+    # 股本：优先 净资产/每股净资产；缺失时退化为 净利润/每股收益（同一报告期，口径自洽）
+    shares = pd.Series(np.nan, index=wide.index)
+    if "bps" in wide.columns and "equity" in wide.columns:
+        shares = pd.Series(
+            np.where((wide["bps"] > 0) & (wide["equity"] > 0), wide["equity"] / wide["bps"], np.nan),
+            index=wide.index)
+    if "eps" in wide.columns and "net_profit" in wide.columns:
+        eps_shares = pd.Series(
+            np.where((wide["eps"].abs() > 1e-4) & (wide["net_profit"].abs() > 0),
+                     wide["net_profit"] / wide["eps"], np.nan), index=wide.index)
+        shares = shares.where(shares.notna(), eps_shares)
+    wide["shares"] = shares
+    # 经营现金流净额：缺失时用「每股经营现金流量 × 股本」估算（业绩报表口径）
+    if "ocf_ps" in wide.columns:
+        derived_ocf = wide["ocf_ps"].astype(float) * wide["shares"]
+        wide["ocf"] = (wide["ocf"].where(wide["ocf"].notna(), derived_ocf)
+                       if "ocf" in wide.columns else derived_ocf)
 
     for m in CUMULATIVE:
         if m not in wide.columns:
@@ -100,15 +134,14 @@ def _report_panel(fin: pd.DataFrame) -> pd.DataFrame:
         wide["roe_ttm"] = np.where(
             wide["equity"] > 0, wide["net_profit_ttm"] / wide["equity"] * 100, np.nan
         )
-        wide["shares"] = np.where(
-            (wide["bps"] > 0) & (wide["equity"] > 0), wide["equity"] / wide["bps"], np.nan
-        )
+    if "net_profit_ttm" in wide.columns and "ocf_ttm" in wide.columns:
         wide["cfo_to_np"] = np.where(
             wide["net_profit_ttm"] > 0, wide["ocf_ttm"] / wide["net_profit_ttm"], np.nan
         )
         wide["cfo_to_np_std_8q"] = wide.groupby("symbol")["cfo_to_np"].transform(
             lambda s: _rolling(s, 8, 4, how="std")
         )
+    if "revenue_ttm" in wide.columns and "ocf_ttm" in wide.columns:
         wide["cfo_to_rev"] = np.where(
             wide["revenue_ttm"] > 0, wide["ocf_ttm"] / wide["revenue_ttm"], np.nan
         )
@@ -151,10 +184,26 @@ def _dividend_daily(div: pd.DataFrame, symbol: str, dates: pd.Index) -> pd.DataF
     return base
 
 
+def _default_symbols(repo: Repository) -> list[str]:
+    """未显式指定标的时，只算生产股票池（避免全 A 日频因子把库撑爆）。
+
+    研究池（A0，daily_enabled=0）走研究缓存，不写 `fact_factor`。
+    """
+    rows = repo.query(
+        """SELECT DISTINCT m.symbol FROM dim_universe_member m
+             JOIN dim_universe u ON u.universe_id = m.universe_id
+            WHERE u.daily_enabled = 1
+           UNION
+           SELECT DISTINCT symbol FROM dim_sector_member
+            WHERE out_date IS NULL OR out_date = ''"""
+    )
+    return [r["symbol"] for r in rows]
+
+
 def compute_fundamental_factors(repo: Repository, symbols: list[str] | None = None) -> dict[str, int]:
     """计算基本面因子并写入 fact_factor(version='v3')。"""
     if symbols is None:
-        symbols = [r["symbol"] for r in repo.query("SELECT DISTINCT symbol FROM fact_financial")]
+        symbols = _default_symbols(repo)
     fin = _load_financials(repo, symbols)
     if fin.empty:
         logger.warning("无财务数据，跳过基本面因子（先运行 cli fundamentals）")
