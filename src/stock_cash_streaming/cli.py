@@ -432,7 +432,12 @@ def _cmd_nl(args) -> None:
 
 def _cmd_market(args) -> None:
     """全 A 数据底座：股票列表、行情回填、行业、指数、财务报表。"""
+    import socket
+
     from .ingest import full_market, index_quote, industry, statements
+
+    # 数据源偶发长连接不返回：给套接字兜底超时，避免单只股票卡死整个回填
+    socket.setdefaulttimeout(45)
 
     repo = open_repository()
     try:
