@@ -866,6 +866,13 @@ python -m stock_cash_streaming.cli experiments --universe C0
 
 > 观察（非投资建议）：全 A 上 `conservative_investment`（低资产扩张/低 CAPEX 强度）最稳（15.5%、样本外 26.3%），`value_quality` 次之；`residual_momentum` 与 `pead` 在全 A 转负且回撤极深，说明「小盘 + 追高」在 2021 年后失效，需要继续做减法而非加大杠杆。
 
+**回归与页面验收（2026-11-04 第三轮）**
+- 生产基线（defensive/C0）在补数据后重跑：6.99% / 夏普 0.42 / 回撤 -34.97% / 超额 +4.09%（口径变化来自利润表口径统一与公告日改为法定截止日，非代码回归）；
+- 浏览器实测（`#/research?tab=lib`）：8 个策略卡片、A0 指标（保守投资 +15.52%/0.70、价值质量 +9.71%/0.61）、详情页分年度/分市场状态/滚动验证均正常渲染，无错误横幅；
+- 池级闭环复验：C1 绑定 `value_quality` 后跑回测输出「池同步 3 个快照 / tracking running / paper ok」，随后恢复 `defensive` 并 `POST /api/paper/reset` 重建（总资产 231,175.98）；
+- 因子接口复验：`/api/research/factors/asset_growth/ic` 返回 `coverage 0.9948`、9 个年度分组与 up/range/down 三态；`/api/research/factors/corr` 返回 12 因子相关矩阵；自然语言「因子配置模式」跑通（C1：7.56%/0.42，样本外 9.22%）。
+
+
 **测试**：`tests/test_research_platform.py` 27 项，覆盖注册表（版本数量/重复注册）、v4 全因子无未来函数与残差动量剔除近月、v5 报告期派生指标与公告时点对齐、报告期合并与股本/现金流派生（`test_report_panel_derives_income_metrics`）、缩尾/Z/行业中性、策略构建、因子动量权重上限、IC 识别能力、NL 配置校验、容量约束、walk-forward 分段、池快照写入、成员月度快照幂等、财报事件落库；全量 `pytest` 67 项通过。
 
 **已知限制**
