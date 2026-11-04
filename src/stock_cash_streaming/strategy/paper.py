@@ -534,7 +534,8 @@ def refresh_all_paper_accounts(repo: Repository) -> dict:
     单个池失败（数据不足、回测异常）只记录结果，不影响其它池。
     """
     ids = [r["universe_id"] for r in repo.query(
-        "SELECT universe_id FROM dim_universe ORDER BY universe_id")]
+        "SELECT universe_id FROM dim_universe WHERE universe_id <> 'A0' "
+        "ORDER BY universe_id")]
     out: dict = {}
     for uid in ids:
         try:

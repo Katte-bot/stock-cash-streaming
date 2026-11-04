@@ -13,12 +13,14 @@ from ..backtest.metrics import compute_metrics
 from ..storage.repository import open_repository
 from .nl_routes import router as nl_router
 from .pool_routes import router as pool_router
+from .research_routes import router as research_router
 
 BASE = Path(__file__).parent
 app = FastAPI(title="stock-cash-streaming", version="0.1.0")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 app.include_router(pool_router)
 app.include_router(nl_router)
+app.include_router(research_router)
 
 
 def _rows(rs) -> list[dict]:

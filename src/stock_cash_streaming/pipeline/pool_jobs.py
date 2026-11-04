@@ -25,7 +25,6 @@ from ..ingest.universe_sync import sync_symbols
 from ..research.pool_admin import (
     PoolError,
     PoolNotFound,
-    backtest_strategy_name,
     get_pool,
     portfolio_strategy_name,
     set_daily_enabled,
@@ -136,12 +135,13 @@ def _symbol_dates(repo: Repository, symbols: list[str]) -> dict[str, str | None]
 
 
 def backtest_state(repo: Repository, pool_id: str, latest: str | None,
-                   members_updated_at: str | None) -> tuple[str, dict | None]:
+                   members_updated_at: str | None,
+                   strategy_id: str = "defensive") -> tuple[str, dict | None]:
     """missing | stale | latest。成员变更时间晚于回测创建时间时视为过期。"""
     rows = repo.query(
         "SELECT run_id, start_date, end_date, created_at FROM backtest_run "
-        "WHERE strategy=? ORDER BY created_at DESC LIMIT 1",
-        (backtest_strategy_name(pool_id),))
+        "WHERE strategy LIKE ? ORDER BY created_at DESC LIMIT 1",
+        (f"{strategy_id}%_{pool_id}",))
     if not rows:
         return "missing", None
     run = dict(rows[0])
@@ -287,11 +287,13 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
             return finish("failed", str(e))
 
         # 5) 回测
-        state, run = backtest_state(repo, pool_id, latest_data, pool["members_updated_at"])
+        strategy_id = pool.get("strategy_id") or "defensive"
+        state, run = backtest_state(repo, pool_id, latest_data, pool["members_updated_at"],
+                                    strategy_id=strategy_id)
         try:
             if state == "latest" and not force:
                 step("backtest", "skipped", f"已回测至 {run['end_date']}")
-            else:
+            elif strategy_id == "defensive":
                 res = run_backtest(
                     repo, top_k=12, rebalance="monthly", hold_buffer=1.0,
                     strategy="defensive", weighting="vol_inv", vol_target=0.25,
@@ -303,14 +305,24 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
                 step("backtest", "ok",
                      f"年化 {m['annual_return']:.2%}，夏普 {m['sharpe']:.2f}，"
                      f"{res['start']}~{res['end']}")
+            else:
+                from ..research.runner import run_strategy
+
+                res = run_strategy(repo, strategy_id, universe=pool_id, persist=True)
+                m = res["metrics"]
+                step("backtest", "ok",
+                     f"{strategy_id}：年化 {m['annual_return']:.2%}，夏普 {m['sharpe']:.2f}，"
+                     f"{res['start']}~{res['end']}")
         except Exception as e:  # noqa: BLE001
             step("backtest", "failed", str(e))
             return finish("failed", str(e))
 
-        # 6) 目标组合（C0 由全局流水线负责）
+        # 6) 目标组合（C0 由全局流水线负责；研究策略暂不自动生成组合）
         portfolio_name = portfolio_strategy_name(pool_id)
         if pool_id == C0:
             step("portfolio", "skipped", "C0 由全局每日流水线维护")
+        elif strategy_id != "defensive":
+            step("portfolio", "skipped", f"{strategy_id} 为研究策略，暂不生成目标组合")
         else:
             try:
                 exist = repo.query(
@@ -330,9 +342,11 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
             except Exception as e:  # noqa: BLE001
                 step("portfolio", "failed", str(e))
 
-        # 7) 模拟跟踪（C0 由全局流水线负责）
+        # 7) 模拟跟踪（C0 由全局流水线负责；研究策略暂不跟踪）
         if pool_id == C0:
             step("tracking", "skipped", "C0 由全局每日流水线维护")
+        elif strategy_id != "defensive":
+            step("tracking", "skipped", f"{strategy_id} 为研究策略，暂不跟踪")
         else:
             try:
                 row = repo.query(

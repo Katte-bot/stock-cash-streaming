@@ -430,6 +430,121 @@ def _cmd_nl(args) -> None:
                   f"{t['hold_days']} 日  {t['pnl']:+.2%}")
 
 
+def _cmd_market(args) -> None:
+    """全 A 数据底座：股票列表、行情回填、行业、指数、财务报表。"""
+    from .ingest import full_market, index_quote, industry, statements
+
+    repo = open_repository()
+    try:
+        if args.sync_symbols or args.backfill:
+            print("同步全 A 股票列表…")
+            print(full_market.sync_symbols(repo))
+
+        if args.backfill:
+            stats = full_market.backfill_quotes(
+                repo, start_date=args.start, end_date=args.end,
+                limit=args.limit, only_missing=args.only_missing,
+                sleep=args.sleep, workers=args.workers,
+            )
+            print("行情回填：", stats)
+
+        if args.industry:
+            print("同步申万行业分类…")
+            print(industry.sync_sw_industry(repo))
+
+        if args.index:
+            print("同步指数行情…")
+            print(index_quote.sync_index_quotes(repo, start_date=args.start))
+
+        if args.statements:
+            print("同步现金流量表/资产负债表…")
+            print(statements.sync_statements(
+                repo, limit=args.stmt_limit, only_missing=args.only_missing,
+                workers=max(1, args.workers // 2),
+            ))
+
+        print("\n===== 全 A 数据覆盖度 =====")
+        print("行情：", full_market.coverage(repo, args.start))
+        print("财务：", statements.coverage(repo))
+        print("行业：", repo.count("dim_stock_industry"), "只")
+    finally:
+        repo.close()
+
+
+def _cmd_strat(args) -> None:
+    """策略研究：列表 / 回测 / 对比 / IC / 因子动量。"""
+    from .research import ic as ic_mod
+    from .research.runner import run_strategy
+    from .strategy.registry import ensure_registered, list_specs
+
+    ensure_registered()
+    repo = open_repository()
+    try:
+        if args.action == "list":
+            print("\n===== 策略库 =====")
+            for s in list_specs():
+                print(f"  {s.id:<24} {s.name:<12} [{s.category}] 因子 {len(s.factors)} 个")
+            return
+
+        if args.action == "backtest":
+            res = run_strategy(repo, args.strategy, universe=args.universe,
+                               start=args.start, end=args.end, oos_start=args.oos_start,
+                               persist=not args.no_persist)
+            m, oos = res["metrics"], res["oos"]
+            print(f"\n===== {res['strategy_name']}（{res['universe']}）=====")
+            print(f"区间      : {res['start']} ~ {res['end']}")
+            print(f"年化/夏普 : {m.get('annual_return', 0):.2%} / {m.get('sharpe', 0):.2f}")
+            print(f"最大回撤  : {m.get('max_drawdown', 0):.2%}")
+            if oos:
+                print(f"样本外    : 年化 {oos.get('annual_return', 0):.2%}，夏普 {oos.get('sharpe', 0):.2f}")
+            print(f"评分      : {res['scorecard']['score']}  {'；'.join(res['scorecard']['reasons']) or '无警示'}")
+            if res["positions"]:
+                print("最新持仓  :", " ".join(res["positions"]))
+            return
+
+        if args.action == "compare":
+            ids = [x.strip() for x in (args.strategies or "").split(",") if x.strip()]
+            if len(ids) < 2:
+                print("请用 --strategies 指定至少 2 个策略（逗号分隔）")
+                return
+            print(f"\n===== 策略对比（{args.universe}）=====")
+            for sid in ids:
+                try:
+                    r = run_strategy(repo, sid, universe=args.universe,
+                                     start=args.start, end=args.end,
+                                     oos_start=args.oos_start, persist=False)
+                    m, o = r["metrics"], r["oos"]
+                    print(f"  {sid:<24} 年化 {m.get('annual_return', 0):>7.2%}  "
+                          f"夏普 {m.get('sharpe', 0):>5.2f}  回撤 {m.get('max_drawdown', 0):>7.2%}  "
+                          f"OOS年化 {o.get('annual_return', 0):>7.2%}  评分 {r['scorecard']['score']:>5}")
+                except Exception as e:  # noqa: BLE001
+                    print(f"  {sid:<24} 失败：{e}")
+            return
+
+        if args.action == "ic":
+            res = ic_mod.run_ic(repo, universe=args.universe, start=args.start, end=args.end,
+                                horizons=tuple(int(x) for x in args.horizons.split(",")))
+            for h, items in res["horizons"].items():
+                ranked = sorted(items.items(), key=lambda kv: -abs(kv[1]["mean_ic"]))[:10]
+                print(f"\n===== IC 排名（{h}）=====")
+                for name, v in ranked:
+                    print(f"  {name:<22} IC {v['mean_ic']:>7.4f}  ICIR {v['icir']:>6.2f}  "
+                          f"正比例 {v['positive_ratio']:.2f}")
+            return
+
+        if args.action == "meta":
+            res = run_strategy(repo, "factor_momentum", universe=args.universe,
+                               start=args.start, end=args.end, persist=True)
+            print(f"\n===== 因子动量（{args.universe}）=====")
+            for sid, w in sorted((res.get("weights") or {}).items(), key=lambda kv: -kv[1]):
+                print(f"  {sid:<24} {w:.1%}")
+            print(f"年化 {res['metrics'].get('annual_return', 0):.2%}，"
+                  f"夏普 {res['metrics'].get('sharpe', 0):.2f}，评分 {res['scorecard']['score']}")
+            return
+    finally:
+        repo.close()
+
+
 def _cmd_daily(args) -> None:
     from .pipeline.daily import run_daily_pipeline
 
@@ -920,6 +1035,33 @@ def main(argv: list[str] | None = None) -> None:
     p_nl.add_argument("--top-n", type=int, default=5, help="最多同时持仓数（默认 5）")
     p_nl.add_argument("--save", action="store_true", help="保存策略与最近结果")
     p_nl.set_defaults(func=_cmd_nl)
+
+    p_mkt = sub.add_parser("market", help="全 A 数据底座：列表 / 行情 / 行业 / 指数 / 财务报表")
+    p_mkt.add_argument("--sync-symbols", action="store_true", help="同步全 A 股票列表")
+    p_mkt.add_argument("--backfill", action="store_true", help="回填日线行情（可中断续跑）")
+    p_mkt.add_argument("--only-missing", action="store_true", help="只处理尚无数据的股票")
+    p_mkt.add_argument("--industry", action="store_true", help="同步申万行业分类")
+    p_mkt.add_argument("--index", action="store_true", help="同步指数行情（沪深300/中证500/1000/全指）")
+    p_mkt.add_argument("--statements", action="store_true", help="回填现金流量表/资产负债表关键科目")
+    p_mkt.add_argument("--stmt-limit", type=int, default=None, help="本次财报回填的股票数上限")
+    p_mkt.add_argument("--limit", type=int, default=None, help="本次行情回填的股票数上限")
+    p_mkt.add_argument("--start", default="2018-01-01", help="起始日期")
+    p_mkt.add_argument("--end", default=None, help="结束日期（默认今天）")
+    p_mkt.add_argument("--sleep", type=float, default=0.12, help="每只股票请求间隔（秒）")
+    p_mkt.add_argument("--workers", type=int, default=10, help="行情回填并发线程数（默认 10）")
+    p_mkt.set_defaults(func=_cmd_market)
+
+    p_st = sub.add_parser("strat", help="策略研究：列表 / 回测 / 对比 / IC / 因子动量")
+    p_st.add_argument("action", choices=["list", "backtest", "compare", "ic", "meta"])
+    p_st.add_argument("--strategy", default="value_quality", help="策略 ID（backtest 用）")
+    p_st.add_argument("--strategies", default="", help="逗号分隔的策略 ID（compare 用）")
+    p_st.add_argument("--universe", default="A0", help="样本域：A0/C0~C3/自定义池")
+    p_st.add_argument("--start", default=None, help="开始日期")
+    p_st.add_argument("--end", default=None, help="结束日期")
+    p_st.add_argument("--oos-start", default=None, help="样本外起点（默认 2024-01-01）")
+    p_st.add_argument("--horizons", default="1,5,20", help="IC 持有期（逗号分隔）")
+    p_st.add_argument("--no-persist", action="store_true", help="不落库（对比/试跑）")
+    p_st.set_defaults(func=_cmd_strat)
 
     p_daily = sub.add_parser("daily", help="每日自动流水线（增量→因子→信号→组合→跟踪）")
     p_daily.add_argument("--force", action="store_true", help="非交易日/行情未更新时也强制执行")

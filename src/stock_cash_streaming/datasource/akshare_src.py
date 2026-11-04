@@ -39,12 +39,12 @@ def infer_market(symbol: str) -> str:
 
     深市 ETF/LOF/基金（15/16/18 开头）必须归 sz，否则腾讯/新浪接口取不到数据。
     """
+    if symbol.startswith(("92", "4", "8")):
+        return "bj"
     if symbol.startswith(("6", "9")):
         return "sh"
     if symbol.startswith(("0", "3", "2", "1")):
         return "sz"
-    if symbol.startswith(("4", "8")):
-        return "bj"
     return "sh"
 
 

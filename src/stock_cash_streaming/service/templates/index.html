@@ -264,6 +264,36 @@
     .tbl-pf .wbar{width:40px}
     .kpi .val{font-size:20px}
   }
+  /* ---------- 策略研究 Hub ---------- */
+  .rtabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px;margin-bottom:14px;
+         border-bottom:1px solid var(--border);scrollbar-width:thin}
+  .rtab{flex:0 0 auto;cursor:pointer;font-family:inherit;font-size:13px;color:var(--muted);
+        background:transparent;border:1px solid transparent;padding:8px 14px;border-radius:10px;transition:.18s}
+  .rtab:hover{background:var(--panel);color:var(--text)}
+  .rtab.active{background:linear-gradient(135deg,rgba(99,102,241,.24),rgba(34,211,238,.12));
+        color:var(--text);border-color:rgba(99,102,241,.35);font-weight:600}
+  .rbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+  .chip{cursor:pointer;font-family:inherit;font-size:11.5px;color:var(--muted);
+        background:var(--panel);border:1px solid var(--border);padding:5px 11px;border-radius:999px}
+  .chip.active{color:var(--text);border-color:rgba(99,102,241,.45);background:rgba(99,102,241,.16)}
+  .scards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+  .scard{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px;
+         cursor:pointer;transition:.18s;position:relative}
+  .scard:hover{border-color:var(--border2);transform:translateY(-1px)}
+  .scard h3{margin:0 0 4px;font-size:14px;font-weight:650;display:flex;align-items:center;gap:7px}
+  .scard .sd{font-size:11.5px;color:var(--muted);line-height:1.65;min-height:38px;
+             display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .scard .sk{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:11px}
+  .scard .sk div{background:var(--panel2);border-radius:8px;padding:6px 7px}
+  .scard .sk span{display:block;font-size:10px;color:var(--faint)}
+  .scard .sk b{display:block;font-size:12.5px;margin-top:2px;font-variant-numeric:tabular-nums}
+  .scard .sfoot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;
+                font-size:11px;color:var(--faint)}
+  .dot-tag{padding:2px 8px;border-radius:999px;font-size:10.5px;border:1px solid var(--border)}
+  .dot-tag.prod{color:#34d399;border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.1)}
+  .dot-tag.cand{color:#fbbf24;border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.1)}
+  .dot-tag.res{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -361,6 +391,16 @@
       <div class="kpi"><div class="lab">今日信号</div><div class="val" id="kSignals">--</div><div class="hint">池内综合评分产出</div></div>
       <div class="kpi"><div class="lab">最新回测年化</div><div class="val" id="kAnnual">--</div><div class="hint" id="kAnnualHint">--</div></div>
       <div class="kpi"><div class="lab">夏普比率</div><div class="val" id="kSharpe">--</div><div class="hint">2018 至今</div></div>
+    </div>
+
+    <div class="card" id="poolStrategyCard">
+      <h2>当前策略 <span class="tag" id="psTag">--</span></h2>
+      <p class="desc">切换后立即触发一次池任务；非防御策略仅刷新回测，目标组合/模拟跟踪仍按防御基线运行</p>
+      <div class="pfbar">
+        <select class="input" id="psSelect" style="max-width:320px"></select>
+        <button class="btn primary" id="psApply">切换并运行</button>
+        <span class="reasons" id="psMsg"></span>
+      </div>
     </div>
 
     <div class="sec" id="secMarket">
@@ -540,12 +580,157 @@
     </div>
   </section>
 
+  <!-- ==================== 策略研究 Hub ==================== -->
+  <section class="page" id="pageResearch" hidden>
+    <div class="rtabs" id="researchTabs">
+      <button class="rtab active" data-rtab="lib">策略库</button>
+      <button class="rtab" data-rtab="compare">策略对比</button>
+      <button class="rtab" data-rtab="factors">因子实验室</button>
+      <button class="rtab" data-rtab="meta">因子择时</button>
+      <button class="rtab" data-rtab="nl">自然语言</button>
+    </div>
+
+    <div class="rbar">
+      <label class="field">样本域
+        <select class="input" id="rUniverse">
+          <option value="A0">A0 全 A（研究）</option>
+          <option value="C0">C0 当前板块</option>
+          <option value="C1">C1 用户指定</option>
+          <option value="C2">C2 防御行业</option>
+          <option value="C3">C3 防御扩展</option>
+        </select>
+      </label>
+      <span class="reasons" id="rStatus">首次加载会构建研究因子缓存，可能需要数分钟</span>
+    </div>
+
+    <div id="rtabLib">
+      <div class="chips" id="rChips"></div>
+      <div class="scards" id="strategyCards"></div>
+      <div class="card" style="margin-top:16px">
+        <h2>策略排行榜 <span class="tag">按评分卡排序</span></h2>
+        <p class="desc">评分仅用于研究排序；样本外为负会标记警示，不构成投资建议</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>策略</th><th>类别</th><th class="num">年化</th><th class="num">夏普</th><th class="num">回撤</th><th class="num">样本外年化</th><th class="num">评分</th><th>最近运行</th></tr></thead>
+            <tbody id="strategyBoard"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" id="stratDetail" style="display:none">
+        <h2><span id="sdName">--</span> <span class="tag" id="sdTag">--</span></h2>
+        <p class="desc" id="sdDesc"></p>
+        <div class="pfbar">
+          <button class="btn primary" id="sdRunBtn">运行回测</button>
+          <label class="reasons" style="display:flex;gap:6px;align-items:center">
+            <input type="checkbox" id="sdForce" /> 强制刷新因子缓存
+          </label>
+          <span class="reasons" id="sdMsg"></span>
+        </div>
+        <div class="mgrid" id="sdMetrics"></div>
+        <div class="chart" id="sdChart"></div>
+        <div class="grid2" style="margin-top:12px">
+          <div>
+            <h2 style="font-size:13px">分年度收益</h2>
+            <div class="table-wrap"><table><tbody id="sdYearly"></tbody></table></div>
+          </div>
+          <div>
+            <h2 style="font-size:13px">分市场状态</h2>
+            <div class="table-wrap"><table><tbody id="sdRegime"></tbody></table></div>
+          </div>
+        </div>
+        <div class="reasons" id="sdPositions" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <div id="rtabCompare" hidden>
+      <div class="card">
+        <h2>选择策略 <span class="tag">2–5 个</span></h2>
+        <p class="desc">同一区间、同一交易规则下比较；样本外区间默认 2024-01-01 起</p>
+        <div class="chips" id="cmpChips"></div>
+        <div class="pfbar">
+          <button class="btn primary" id="cmpRunBtn">开始对比</button>
+          <span class="reasons" id="cmpMsg"></span>
+        </div>
+      </div>
+      <div id="cmpResult" style="display:none">
+        <div class="card">
+          <h2>净值对比 <span class="tag">起点归一</span></h2>
+          <div class="chart" id="cmpChart"></div>
+        </div>
+        <div class="card">
+          <h2>指标对比</h2>
+          <div class="table-wrap"><table><tbody id="cmpTable"></tbody></table></div>
+        </div>
+        <div class="card">
+          <h2>相关性 <span class="tag">日收益</span></h2>
+          <div class="table-wrap"><table><tbody id="cmpCorr"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rtabFactors" hidden>
+      <div class="card">
+        <h2>因子实验室 <span class="tag">IC / 分组收益</span></h2>
+        <p class="desc">IC 为截面 RankIC 均值；分组收益仅用于研究展示，不代表可交易收益</p>
+        <div class="rbar">
+          <label class="field">因子<select class="input" id="fName"></select></label>
+          <label class="field">持有期
+            <select class="input" id="fHorizon">
+              <option value="1">1 日</option>
+              <option value="5" selected>5 日</option>
+              <option value="20">20 日</option>
+            </select>
+          </label>
+          <button class="btn primary" id="fRunBtn">查看</button>
+          <span class="reasons" id="fMsg"></span>
+        </div>
+      </div>
+      <div id="fResult" style="display:none">
+        <div class="card">
+          <div class="mgrid" id="fMetrics"></div>
+          <h2 style="font-size:13px">IC 时序</h2>
+          <div class="chart" id="fIcChart"></div>
+        </div>
+        <div class="card">
+          <h2 style="font-size:13px">10 分组远期收益 <span class="tag">研究展示</span></h2>
+          <div class="chart" id="fQChart"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rtabMeta" hidden>
+      <div class="card">
+        <h2>因子动量权重 <span class="tag" id="metaDate">--</span></h2>
+        <p class="desc">按候选策略近 3/6/12 个月表现分配权重；单策略上限 40%</p>
+        <div class="pfbar">
+          <button class="btn primary" id="metaRunBtn">重新计算</button>
+          <span class="reasons" id="metaMsg"></span>
+        </div>
+        <div class="chart" id="metaWeightChart"></div>
+        <div class="chart" id="metaHistChart"></div>
+      </div>
+    </div>
+
+    <div id="rtabNl" hidden>
+      <div class="card">
+        <h2>自然语言策略</h2>
+        <p class="desc">用中文描述规则或因子配置，LLM 解析为受控 JSON 后回测；不执行生成代码</p>
+        <button class="btn primary" id="nlOpenBtn">打开自然语言实验室</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ==================== 策略研究 ==================== -->
   <section class="page" id="pageNL" hidden>
     <div class="grid2">
       <div class="card">
         <h2>描述你的策略 <span class="tag">LLM → 白名单规则</span></h2>
-        <p class="desc">用中文描述买卖条件，系统解析为受控规则（不支持任意代码）；解析后请先确认规则再回测</p>
+        <div class="chips" id="nlModeChips">
+          <button class="chip active" data-mode="rule">规则模式</button>
+          <button class="chip" data-mode="factor">因子配置模式</button>
+        </div>
+        <p class="desc" id="nlDesc">用中文描述买卖条件，系统解析为受控规则（不支持任意代码）；解析后请先确认规则再回测</p>
         <textarea class="textarea" id="nlText" rows="4" placeholder="例如：
 1. 周K线9连阴后买入并持仓1周
 2. 日K线10连阴后买入，并持仓2日
@@ -718,17 +903,25 @@ function poolLabel(id){
 function parseHash(){
   const h = (location.hash || '').replace(/^#\/?/, '');
   if (h.startsWith('pool/')) return {view:'pool', pool: decodeURIComponent(h.slice(5))};
+  if (h.startsWith('research/detail/')) return {
+    view:'research', tab:'lib', detail: decodeURIComponent(h.slice(16)), pool: state.universe};
+  if (h === 'research' || h.startsWith('research?')) {
+    const q = h.includes('?') ? h.slice(h.indexOf('?') + 1) : '';
+    const tab = (new URLSearchParams(q).get('tab') || 'lib');
+    return {view:'research', tab, pool: state.universe};
+  }
   if (h === 'nl' || h.startsWith('nl/')) return {view:'nl', pool: state.universe};
   return {view:'overview', pool: state.universe};
 }
 function goOverview(){ location.hash = '#/overview'; }
 function goPool(id){ location.hash = '#/pool/' + encodeURIComponent(id); }
+function goResearch(tab='lib'){ location.hash = '#/research?tab=' + tab; }
 
 function setActiveNav(){
   document.querySelectorAll('.nav-item').forEach(b => {
     const nav = b.dataset.nav;
     if (!nav || nav === 'action'){ b.classList.remove('active'); return; }
-    const on = nav === 'nl' ? state.view === 'nl'
+    const on = nav === 'nl' ? (state.view === 'research' || state.view === 'nl')
       : nav === 'overview' ? state.view === 'overview'
       : (state.view === 'pool' && b.dataset.pool === state.universe);
     b.classList.toggle('active', on);
@@ -741,13 +934,18 @@ function applyView(){
   if (p.view === 'pool') state.universe = p.pool || 'C0';
   const isPool = state.view === 'pool';
   const isNL = state.view === 'nl';
+  const isResearch = state.view === 'research';
   $('pageOverview').hidden = state.view !== 'overview';
   $('pagePool').hidden = !isPool;
   $('pageNL').hidden = !isNL;
+  $('pageResearch').hidden = !isResearch;
   const pool = isPool ? poolOf(state.universe) : null;
-  $('pageTitle').textContent = isNL ? '策略研究' : (isPool ? poolLabel(state.universe) : '总览');
+  $('pageTitle').textContent = isResearch ? '策略研究'
+    : (isNL ? '自然语言策略' : (isPool ? poolLabel(state.universe) : '总览'));
   // 池详情只保留一行说明，避免标题重复
-  $('pageSub').textContent = isNL
+  $('pageSub').textContent = isResearch
+    ? '策略库 · 策略对比 · 因子实验室 · 因子择时'
+    : isNL
     ? '中文描述买卖条件 · LLM 解析为受控规则 · 选择股票池回测'
     : isPool
     ? [state.universe,
@@ -761,9 +959,14 @@ function applyView(){
   window.scrollTo({top:0});
   if (isPool){
     renderPoolHeader();
+    loadPoolStrategy();
     resetReport();
     load();
     loadUniverses();
+  } else if (isResearch){
+    switchRTab(p.tab || 'lib', false);
+    loadResearch();
+    if (p.detail) openStrategyDetail(p.detail);
   } else if (isNL){
     nlFillUniverses();
     loadNLStrategies();
@@ -775,28 +978,483 @@ function applyView(){
   setTimeout(resizeCharts, 120);
 }
 
+/* ---------- 策略研究 Hub ---------- */
+const researchState = {
+  items: [], filter: 'all', tab: 'lib', detail: null,
+  compare: [], universe: 'A0', factors: [], lastDetail: null,
+};
+const RC = ['#6366f1', '#22d3ee', '#f59e0b', '#ef4444', '#10b981', '#a78bfa'];
+
+function switchRTab(tab, updateHash=true){
+  researchState.tab = tab;
+  document.querySelectorAll('#researchTabs .rtab').forEach(b =>
+    b.classList.toggle('active', b.dataset.rtab === tab));
+  [['lib','rtabLib'], ['compare','rtabCompare'], ['factors','rtabFactors'],
+   ['meta','rtabMeta'], ['nl','rtabNl']].forEach(([k, id]) => {
+    const el = $(id); if (el) el.hidden = k !== tab;
+  });
+  if (updateHash) history.replaceState(null, '', '#/research?tab=' + tab);
+  if (tab === 'factors' && !researchState.factors.length) loadFactorMeta();
+  if (tab === 'meta') loadMeta();
+}
+
+function _rUniverse(){ return $('rUniverse')?.value || 'A0'; }
+
+async function loadResearch(){
+  const u = _rUniverse();
+  researchState.universe = u;
+  $('rStatus').textContent = '加载策略库…';
+  try{
+    const r = await fetch('/api/research/strategies?universe=' + encodeURIComponent(u),
+                          {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    researchState.items = d.items || [];
+    $('rStatus').textContent = `样本域 ${u} · ${researchState.items.length} 个策略`;
+    renderResearch();
+  }catch(e){
+    $('rStatus').textContent = '加载失败：' + e.message;
+    $('strategyCards').innerHTML = `<div class="empty">${e.message}</div>`;
+  }
+}
+
+function renderResearch(){
+  const items = researchState.items;
+  const cats = ['all', ...Array.from(new Set(items.map(x => x.category)))];
+  const catLabel = {all:'全部', fundamental:'基本面', price:'价格行为', event:'事件', meta:'复合', baseline:'基线'};
+  $('rChips').innerHTML = cats.map(c => {
+    const n = c === 'all' ? items.length : items.filter(x => x.category === c).length;
+    return `<button class="chip ${researchState.filter === c ? 'active' : ''}"
+      onclick="researchState.filter='${c}';renderResearch()">${catLabel[c] || c} ${n}</button>`;
+  }).join('');
+
+  const list = researchState.filter === 'all'
+    ? items : items.filter(x => x.category === researchState.filter);
+  $('strategyCards').innerHTML = list.map(s => {
+    const f = (s.last_run && s.last_run.full) || {};
+    const tags = {production:['prod','生产'], candidate:['cand','候选'], research:['res','研究']};
+    const [tc, tl] = tags[s.status] || tags.research;
+    return `<div class="scard" onclick="openStrategyDetail('${s.strategy_id}')">
+      <h3>${s.name}<span class="dot-tag ${tc}">${tl}</span></h3>
+      <div class="sd">${s.description}</div>
+      <div class="sk">
+        <div><span>年化</span><b class="${cls(f.annual_return)}">${f.annual_return == null ? '--' : fmtPct(f.annual_return * 100)}</b></div>
+        <div><span>夏普</span><b>${f.sharpe == null ? '--' : Number(f.sharpe).toFixed(2)}</b></div>
+        <div><span>回撤</span><b class="down">${f.max_drawdown == null ? '--' : fmtPct(f.max_drawdown * 100)}</b></div>
+        <div><span>评分</span><b>${s.last_run && s.last_run.score != null ? s.last_run.score : '--'}</b></div>
+      </div>
+      <div class="sfoot">
+        <span>${(s.factors || []).length} 个因子 · ${s.category}</span>
+        <span>${s.last_run ? (s.last_run.created_at || '').slice(0, 10) : '未运行'}</span>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">暂无策略</div>';
+
+  const ranked = [...items].filter(x => x.last_run).sort(
+    (a, b) => (b.last_run.score || 0) - (a.last_run.score || 0));
+  $('strategyBoard').innerHTML = ranked.map(s => {
+    const f = s.last_run.full || {}, o = s.last_run.oos || {};
+    const warn = (s.last_run.scorecard && s.last_run.scorecard.reasons || []).length
+      ? `<span class="tag" title="${(s.last_run.scorecard.reasons || []).join('；')}">有警示</span>` : '';
+    return `<tr class="clickable" onclick="openStrategyDetail('${s.strategy_id}')">
+      <td>${s.name}${warn}<span class="sym">${s.strategy_id}</span></td>
+      <td>${s.category}</td>
+      <td class="num ${cls(f.annual_return)}">${f.annual_return == null ? '--' : fmtPct(f.annual_return * 100)}</td>
+      <td class="num">${f.sharpe == null ? '--' : Number(f.sharpe).toFixed(2)}</td>
+      <td class="num down">${f.max_drawdown == null ? '--' : fmtPct(f.max_drawdown * 100)}</td>
+      <td class="num ${cls(o.annual_return)}">${o.annual_return == null ? '--' : fmtPct(o.annual_return * 100)}</td>
+      <td class="num">${s.last_run.score == null ? '--' : s.last_run.score}</td>
+      <td>${(s.last_run.created_at || '').slice(0, 16)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty">尚无回测记录，点击策略卡片运行</td></tr>';
+
+  // 对比选择
+  researchState.compare = researchState.compare.filter(id => items.some(x => x.strategy_id === id));
+  $('cmpChips').innerHTML = items.map(s => `<button class="chip ${researchState.compare.includes(s.strategy_id) ? 'active' : ''}"
+    onclick="toggleCompare('${s.strategy_id}')">${s.name}</button>`).join('');
+}
+
+function toggleCompare(id){
+  const i = researchState.compare.indexOf(id);
+  if (i >= 0) researchState.compare.splice(i, 1);
+  else if (researchState.compare.length < 5) researchState.compare.push(id);
+  else { $('cmpMsg').textContent = '最多选择 5 个策略'; return; }
+  renderResearch();
+}
+
+async function openStrategyDetail(id){
+  const u = _rUniverse();
+  $('stratDetail').style.display = 'block';
+  $('sdName').textContent = '加载中…';
+  try{
+    const r = await fetch(`/api/research/strategies/${encodeURIComponent(id)}?universe=${encodeURIComponent(u)}`,
+                          {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    researchState.detail = d.strategy_id;
+    researchState.lastDetail = d;
+    $('sdName').textContent = d.name;
+    $('sdTag').textContent = `${d.category} · ${d.strategy_id}`;
+    $('sdDesc').textContent = d.description;
+    $('sdRunBtn').dataset.sid = d.strategy_id;
+    if (d.last_run){
+      renderDetailMetrics(d.last_run);
+      renderDetailNav(d.nav || []);
+    } else {
+      $('sdMetrics').innerHTML = '<div class="empty">尚未运行，点击「运行回测」</div>';
+      $('sdYearly').innerHTML = ''; $('sdRegime').innerHTML = '';
+      $('sdPositions').textContent = '';
+      if (charts['sdChart']) charts['sdChart'].clear();
+    }
+  }catch(e){
+    $('sdName').textContent = '加载失败';
+    $('sdDesc').textContent = e.message;
+  }
+}
+
+function renderDetailMetrics(run){
+  const m = run.full || {}, o = run.oos || {}, sc = run.scorecard || {};
+  const items = [
+    ['年化收益', m.annual_return == null ? '--' : fmtPct(m.annual_return * 100), cls(m.annual_return)],
+    ['夏普', m.sharpe == null ? '--' : Number(m.sharpe).toFixed(2), ''],
+    ['最大回撤', m.max_drawdown == null ? '--' : fmtPct(m.max_drawdown * 100), 'down'],
+    ['超额年化', m.excess_annual == null ? '--' : fmtPct(m.excess_annual * 100), cls(m.excess_annual)],
+    ['样本外年化', o.annual_return == null ? '--' : fmtPct(o.annual_return * 100), cls(o.annual_return)],
+    ['样本外夏普', o.sharpe == null ? '--' : Number(o.sharpe).toFixed(2), ''],
+    ['评分', sc.score == null ? '--' : sc.score, ''],
+    ['交易成本', m.cost_paid == null ? '--' : fmtPct(m.cost_paid * 100), ''],
+  ];
+  $('sdMetrics').innerHTML = items.map(([k,v,c]) =>
+    `<div class="m"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+  const y = run.yearly || {};
+  $('sdYearly').innerHTML = Object.keys(y).sort().map(k =>
+    `<tr><td>${k}</td><td class="num ${cls(y[k])}">${fmtPct(y[k] * 100)}</td></tr>`).join('')
+    || '<tr><td class="empty">暂无</td></tr>';
+  const rg = run.regime || {};
+  const rgLabel = {up:'上行', range:'震荡', down:'下行'};
+  $('sdRegime').innerHTML = Object.keys(rg).map(k => {
+    const x = rg[k];
+    return `<tr><td>${rgLabel[k] || k}</td><td class="num ${cls(x.strategy_ann)}">${fmtPct((x.strategy_ann || 0) * 100)}</td>
+      <td class="num ${cls(x.benchmark_ann)}">${fmtPct((x.benchmark_ann || 0) * 100)}</td></tr>`;
+  }).join('') || '<tr><td class="empty">暂无</td></tr>';
+  $('sdPositions').textContent = (sc.reasons && sc.reasons.length)
+    ? '提示：' + sc.reasons.join('；') : '未触发评分警示。';
+}
+
+function renderDetailNav(nav){
+  if (!nav || nav.length < 2){
+    if (charts['sdChart']) charts['sdChart'].clear();
+    $('sdMsg').textContent = '暂无可绘制的净值曲线';
+    return;
+  }
+  const base = nav[0].nav || 1, bbase = nav[0].benchmark || base;
+  chart('sdChart').setOption({
+    grid:{left:12,right:20,top:24,bottom:24,containLabel:true},
+    legend:{data:['策略','基准'],right:10,top:0,textStyle:{color:C().axis,fontSize:11},itemWidth:14,itemHeight:8},
+    xAxis:{type:'category',data:nav.map(x=>x.trade_date),boundaryGap:false,...ax(),
+           axisLabel:{...ax().axisLabel,formatter:v=>v.slice(0,7)}},
+    yAxis:{type:'value',scale:true,...ax(),axisLabel:{...ax().axisLabel,formatter:v=>v.toFixed(2)}},
+    tooltip:tip(),
+    series:[
+      {name:'策略',type:'line',smooth:true,symbol:'none',
+       data:nav.map(x=> +(x.nav / base).toFixed(4)),
+       lineStyle:{width:2.2,color:'#6366f1'}},
+      {name:'基准',type:'line',smooth:true,symbol:'none',
+       data:nav.map(x=> +((x.benchmark ?? base) / bbase).toFixed(4)),
+       lineStyle:{width:1.6,color:'#22d3ee',type:'dashed'}}
+    ]
+  }, true);
+  setTimeout(() => charts['sdChart'] && charts['sdChart'].resize(), 60);
+}
+
+async function runStrategyBacktest(sid){
+  const u = _rUniverse();
+  const force = $('sdForce').checked;
+  $('sdRunBtn').disabled = true;
+  $('sdMsg').textContent = `回测中（${u}）…首次构建因子缓存可能较慢`;
+  try{
+    const r = await fetch(`/api/research/strategies/${encodeURIComponent(sid)}/backtest`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({universe:u, persist:true, force_refresh:force}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    $('sdMsg').textContent = `完成：年化 ${fmtPct((d.metrics.annual_return || 0) * 100)}，评分 ${d.scorecard.score}`;
+    renderDetailMetrics({full:d.metrics, oos:d.oos, yearly:d.yearly, regime:d.regime, scorecard:d.scorecard});
+    renderDetailNav(d.nav || []);
+    if (d.positions && d.positions.length)
+      $('sdPositions').textContent = '最新持仓：' + d.positions.join(' ');
+    loadResearch();
+  }catch(e){
+    $('sdMsg').textContent = '失败：' + e.message;
+  }finally{
+    $('sdRunBtn').disabled = false;
+  }
+}
+
+async function runCompare(){
+  if (researchState.compare.length < 2){
+    $('cmpMsg').textContent = '至少选择 2 个策略'; return;
+  }
+  $('cmpMsg').textContent = '回测中…';
+  $('cmpRunBtn').disabled = true;
+  try{
+    const r = await fetch('/api/research/compare', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({strategy_ids: researchState.compare, universe: _rUniverse()}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    const ids = d.results.filter(x => !x.error).map(x => x.strategy_id);
+    const names = Object.fromEntries(d.results.map(x => [x.strategy_id, x.name || x.strategy_id]));
+    if (!ids.length) throw new Error('没有可对比的结果');
+    const nav = d.nav || [];
+    chart('cmpChart').setOption({
+      grid:{left:12,right:20,top:30,bottom:24,containLabel:true},
+      legend:{data:ids.map(x => names[x]),right:10,top:0,textStyle:{color:C().axis,fontSize:11},itemWidth:14,itemHeight:8},
+      xAxis:{type:'category',data:nav.map(x=>x.trade_date),boundaryGap:false,...ax(),
+             axisLabel:{...ax().axisLabel,formatter:v=>String(v).slice(0,7)}},
+      yAxis:{type:'value',scale:true,...ax(),axisLabel:{...ax().axisLabel,formatter:v=>v.toFixed(2)}},
+      tooltip:tip(),
+      series: ids.map((sid, i) => ({
+        name:names[sid], type:'line', smooth:true, symbol:'none',
+        data:nav.map(x => x[sid]), lineStyle:{width:2, color:RC[i % RC.length]},
+      })),
+    }, true);
+    $('cmpTable').innerHTML = d.results.map(x => {
+      if (x.error) return `<tr><td>${x.strategy_id}</td><td colspan="7" class="empty">${x.error}</td></tr>`;
+      const m = x.metrics || {}, o = x.oos || {}, sc = x.scorecard || {};
+      return `<tr><td>${x.name}</td>
+        <td class="num ${cls(m.annual_return)}">${fmtPct((m.annual_return || 0) * 100)}</td>
+        <td class="num">${(m.sharpe || 0).toFixed(2)}</td>
+        <td class="num down">${fmtPct((m.max_drawdown || 0) * 100)}</td>
+        <td class="num ${cls(m.excess_annual)}">${fmtPct((m.excess_annual || 0) * 100)}</td>
+        <td class="num ${cls(o.annual_return)}">${o.annual_return == null ? '--' : fmtPct(o.annual_return * 100)}</td>
+        <td class="num">${sc.score == null ? '--' : sc.score}</td>
+        <td class="reasons">${(sc.reasons || []).join('；') || '—'}</td></tr>`;
+    }).join('');
+    const corr = d.corr || {};
+    const keys = Object.keys(corr);
+    $('cmpCorr').innerHTML = keys.length
+      ? `<tr><th></th>${keys.map(k => `<th>${names[k] || k}</th>`).join('')}</tr>` +
+        keys.map(k => `<tr><td>${names[k] || k}</td>${keys.map(j =>
+          `<td class="num">${Number(corr[k][j]).toFixed(2)}</td>`).join('')}</tr>`).join('')
+      : '<tr><td class="empty">样本不足</td></tr>';
+    $('cmpResult').style.display = 'block';
+    $('cmpMsg').textContent = `完成：${ids.length} 个策略`;
+    setTimeout(() => charts['cmpChart'] && charts['cmpChart'].resize(), 60);
+  }catch(e){
+    $('cmpMsg').textContent = '失败：' + e.message;
+  }finally{
+    $('cmpRunBtn').disabled = false;
+  }
+}
+
+async function loadFactorMeta(){
+  try{
+    const r = await fetch('/api/research/factors?universe=' + encodeURIComponent(_rUniverse()),
+                          {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    researchState.factors = d.items || [];
+    $('fName').innerHTML = researchState.factors.map(f =>
+      `<option value="${f.name}">${f.label}（${f.name}）</option>`).join('');
+  }catch(e){
+    $('fMsg').textContent = '因子列表加载失败：' + e.message;
+  }
+}
+
+async function runFactor(){
+  const name = $('fName').value, h = $('fHorizon').value;
+  if (!name) return;
+  $('fMsg').textContent = '计算中（首次需构建缓存）…';
+  $('fRunBtn').disabled = true;
+  try{
+    const r = await fetch(`/api/research/factors/${encodeURIComponent(name)}/ic`
+      + `?universe=${encodeURIComponent(_rUniverse())}&horizon=${h}`, {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    const sm = d.summary || {};
+    $('fMetrics').innerHTML = [
+      ['平均 IC', sm.mean_ic == null ? '--' : Number(sm.mean_ic).toFixed(4), cls(sm.mean_ic)],
+      ['ICIR', sm.icir == null ? '--' : Number(sm.icir).toFixed(2), cls(sm.icir)],
+      ['正比例', sm.positive_ratio == null ? '--' : fmtPct(sm.positive_ratio * 100), ''],
+      ['样本数', sm.n == null ? '--' : sm.n, ''],
+    ].map(([k,v,c]) => `<div class="m"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+    const series = d.series || [];
+    chart('fIcChart').setOption({
+      grid:{left:12,right:20,top:18,bottom:24,containLabel:true},
+      xAxis:{type:'category',data:series.map(x=>x.trade_date),boundaryGap:false,...ax(),
+             axisLabel:{...ax().axisLabel,formatter:v=>String(v).slice(0,7)}},
+      yAxis:{type:'value',...ax()},
+      tooltip:tip(),
+      series:[{name:'RankIC',type:'line',smooth:true,symbol:'none',
+               data:series.map(x=>x.ic),lineStyle:{width:1.8,color:'#6366f1'},
+               markLine:{silent:true,symbol:'none',data:[{yAxis:0,lineStyle:{color:'#64748b',type:'dashed'}}]}}],
+    }, true);
+    const q = d.quantiles || [];
+    const groups = ['1','2','3','4','5','6','7','8','9','10'];
+    const avg = groups.map(g => {
+      const vals = q.map(row => row[g]).filter(v => v != null);
+      return vals.length ? +(vals.reduce((a,b)=>a+b,0)/vals.length*100).toFixed(2) : null;
+    });
+    chart('fQChart').setOption({
+      grid:{left:12,right:20,top:18,bottom:24,containLabel:true},
+      xAxis:{type:'category',data:groups.map(g=>'G'+g),...ax()},
+      yAxis:{type:'value',...ax(),axisLabel:{...ax().axisLabel,formatter:v=>v+'%'}},
+      tooltip:{...tip(),trigger:'axis',formatter:p=>`${p[0].name}<br/>平均远期收益：${p[0].value}%`},
+      series:[{type:'bar',barWidth:'55%',data:avg.map(v => ({
+        value:v, itemStyle:{color: v >= 0 ? '#ef4444' : '#10b981', borderRadius:[4,4,0,0]}}))}],
+    }, true);
+    $('fResult').style.display = 'block';
+    $('fMsg').textContent = `${name} · ${d.horizon} 日 · ${series.length} 个采样点`;
+    setTimeout(() => {
+      charts['fIcChart'] && charts['fIcChart'].resize();
+      charts['fQChart'] && charts['fQChart'].resize();
+    }, 60);
+  }catch(e){
+    $('fMsg').textContent = '失败：' + e.message;
+  }finally{
+    $('fRunBtn').disabled = false;
+  }
+}
+
+async function loadMeta(){
+  try{
+    const r = await fetch('/api/research/meta/weights', {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    const items = d.items || [];
+    $('metaDate').textContent = d.trade_date || '--';
+    if (!items.length){
+      $('metaMsg').textContent = '尚未计算权重，请点击「重新计算」';
+      if (charts['metaWeightChart']) charts['metaWeightChart'].clear();
+      if (charts['metaHistChart']) charts['metaHistChart'].clear();
+      return;
+    }
+    $('metaMsg').textContent = '当期权重';
+    chart('metaWeightChart').setOption({
+      grid:{left:12,right:40,top:16,bottom:12,containLabel:true},
+      xAxis:{type:'value',...ax(),axisLabel:{...ax().axisLabel,formatter:v=>(v*100).toFixed(0)+'%'}},
+      yAxis:{type:'category',data:items.map(x=>x.strategy_id),...ax(),splitLine:{show:false}},
+      tooltip:{...tip(),trigger:'axis',formatter:p=>`${p[0].name}<br/>${(p[0].value*100).toFixed(1)}%`},
+      series:[{type:'bar',barWidth:16,data:items.map(x=>x.weight),
+               label:{show:true,position:'right',color:C().axis,formatter:p=>(p.value*100).toFixed(1)+'%'}}],
+    }, true);
+    const hist = d.history || [];
+    const dates = Array.from(new Set(hist.map(x=>x.trade_date))).sort();
+    const sids = Array.from(new Set(hist.map(x=>x.strategy_id)));
+    const series = sids.map((sid, i) => ({
+      name:sid, type:'line', stack:'w', areaStyle:{opacity:.55}, symbol:'none', smooth:true,
+      lineStyle:{width:0,color:RC[i % RC.length]},
+      data: dates.map(dt => {
+        const row = hist.find(x => x.trade_date === dt && x.strategy_id === sid);
+        return row ? row.weight : 0;
+      }),
+    }));
+    chart('metaHistChart').setOption({
+      grid:{left:12,right:20,top:28,bottom:24,containLabel:true},
+      legend:{data:sids,top:0,right:10,textStyle:{color:C().axis,fontSize:10},itemWidth:12,itemHeight:8},
+      xAxis:{type:'category',data:dates,boundaryGap:false,...ax(),
+             axisLabel:{...ax().axisLabel,formatter:v=>String(v).slice(0,7)}},
+      yAxis:{type:'value',...ax(),axisLabel:{...ax().axisLabel,formatter:v=>(v*100).toFixed(0)+'%'}},
+      tooltip:tip(),
+      series,
+    }, true);
+    setTimeout(() => {
+      charts['metaWeightChart'] && charts['metaWeightChart'].resize();
+      charts['metaHistChart'] && charts['metaHistChart'].resize();
+    }, 60);
+  }catch(e){
+    $('metaMsg').textContent = '加载失败：' + e.message;
+  }
+}
+
+async function runMeta(){
+  $('metaMsg').textContent = '计算中…';
+  $('metaRunBtn').disabled = true;
+  try{
+    const r = await fetch('/api/research/strategies/factor_momentum/backtest', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({universe:_rUniverse(), persist:true}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    $('metaMsg').textContent = `完成：年化 ${fmtPct((d.metrics.annual_return || 0) * 100)}`;
+    await loadMeta();
+  }catch(e){
+    $('metaMsg').textContent = '失败：' + e.message;
+  }finally{
+    $('metaRunBtn').disabled = false;
+  }
+}
+
+$('rUniverse').onchange = () => {
+  researchState.filter = 'all';
+  researchState.compare = [];
+  loadResearch();
+};
+document.querySelectorAll('#researchTabs .rtab').forEach(b => {
+  b.onclick = () => switchRTab(b.dataset.rtab);
+});
+$('sdRunBtn').onclick = () => runStrategyBacktest($('sdRunBtn').dataset.sid || researchState.detail);
+$('cmpRunBtn').onclick = runCompare;
+$('fRunBtn').onclick = runFactor;
+$('metaRunBtn').onclick = runMeta;
+$('nlOpenBtn').onclick = () => { location.hash = '#/nl'; };
+
 /* ---------- 策略研究 ---------- */
-const nlState = { spec: null, result: null };
+const nlState = { spec: null, config: null, result: null, mode: 'rule' };
 
 function nlFillUniverses(){
   const sel = $('nlUniverse');
   if (!sel) return;
   const list = poolsState.list || [];
   const cur = sel.value || state.universe || 'C0';
-  sel.innerHTML = list.map(p =>
+  sel.innerHTML = `<option value="A0">A0 全 A（研究）</option>` + list.map(p =>
     `<option value="${p.id}">${p.is_custom ? p.name : p.id}（${p.members_count ?? 0} 只）</option>`
   ).join('');
-  if (list.some(p => p.id === cur)) sel.value = cur;
-  else if (list.length) sel.value = list[0].id;
+  if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+}
+
+function nlSetMode(mode){
+  nlState.mode = mode;
+  document.querySelectorAll('#nlModeChips .chip').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  $('nlDesc').textContent = mode === 'factor'
+    ? '用中文描述因子配置（如：低波动 25%、价值 25%、质量 30%、保守投资 20%，每月调仓，持有 10 只），解析为白名单 JSON 后回测'
+    : '用中文描述买卖条件，系统解析为受控规则（不支持任意代码）；解析后请先确认规则再回测';
+  $('nlText').placeholder = mode === 'factor'
+    ? '例如：帮我设计一个适合 A 股的防御型策略，要求低波动、低估值、盈利质量好，每月调仓，持有 10 只股票'
+    : '例如：\n1. 周K线9连阴后买入并持仓1周\n2. 日K线10连阴后买入，并持仓2日\n3. 周K线 MACD 金叉后买入并持仓2周';
+  nlState.spec = null; nlState.config = null;
+  $('nlSpecBox').style.display = 'none';
+  $('nlRunBtn').disabled = true;
+  $('nlParseMsg').textContent = '';
+  $('nlRunMsg').textContent = '';
 }
 
 function nlApplySpec(spec, describe){
   nlState.spec = spec || null;
+  nlState.config = null;
   $('nlSpecBox').style.display = spec ? 'block' : 'none';
   $('nlSpecJson').value = spec ? JSON.stringify(spec, null, 2) : '';
   $('nlSpecText').innerHTML = (describe || []).map(x => `<div>${x}</div>`).join('');
   $('nlRunBtn').disabled = !spec;
   if (spec && spec.name && !$('nlSaveName').value) $('nlSaveName').value = spec.name;
+}
+
+function nlShowConfig(cfg, describe){
+  nlState.config = cfg || null;
+  nlState.spec = null;
+  $('nlSpecBox').style.display = cfg ? 'block' : 'none';
+  $('nlSpecJson').value = cfg ? JSON.stringify(cfg, null, 2) : '';
+  $('nlSpecText').innerHTML = (describe || []).map(x => `<div>${x}</div>`).join('');
+  $('nlRunBtn').disabled = !cfg;
+  if (cfg && cfg.portfolio && cfg.portfolio.stock_count){
+    $('nlTopN').value = cfg.portfolio.stock_count;
+  }
+  if (cfg && cfg.strategy_name && !$('nlSaveName').value) $('nlSaveName').value = cfg.strategy_name;
 }
 
 async function nlParse(){
@@ -805,15 +1463,25 @@ async function nlParse(){
   $('nlParseBtn').disabled = true;
   $('nlParseMsg').textContent = '解析中…';
   try{
-    const r = await fetch('/api/nl/parse', {
+    const url = nlState.mode === 'factor' ? '/api/nl/config' : '/api/nl/parse';
+    const body = nlState.mode === 'factor' ? {text, run:false} : {text};
+    const r = await fetch(url, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({text})
+      body: JSON.stringify(body)
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-    nlApplySpec(d.spec, d.describe);
-    $('nlParseMsg').textContent = '解析成功，请确认下方规则后回测';
+    if (nlState.mode === 'factor'){
+      nlShowConfig(d.config, d.describe);
+      $('nlParseMsg').textContent = `解析成功：${(d.weights ? Object.keys(d.weights).length : 0)} 个因子，请确认后回测`;
+    } else {
+      nlApplySpec(d.spec, d.describe);
+      $('nlParseMsg').textContent = '解析成功，请确认下方规则后回测';
+    }
   }catch(e){
+    nlState.spec = null; nlState.config = null;
+    $('nlSpecBox').style.display = 'none';
+    $('nlRunBtn').disabled = true;
     $('nlParseMsg').textContent = '解析失败：' + e.message;
   }finally{
     $('nlParseBtn').disabled = false;
@@ -828,6 +1496,15 @@ function nlApplyJson(){
     $('nlParseMsg').textContent = 'JSON 语法错误：' + e.message;
     return;
   }
+  if (nlState.mode === 'factor'){
+    if (!spec || !Array.isArray(spec.factors) || !spec.universe){
+      $('nlParseMsg').textContent = '配置结构不完整：需要 universe、factors、portfolio';
+      return;
+    }
+    nlShowConfig(spec, ['已手动应用配置（回测时由服务端校验）']);
+    $('nlParseMsg').textContent = '配置已应用';
+    return;
+  }
   if (!spec || !spec.timeframe || !spec.entry || !Array.isArray(spec.entry.all)){
     $('nlParseMsg').textContent = '规则结构不完整：需要 timeframe、entry.all、hold_days';
     return;
@@ -839,6 +1516,32 @@ function nlApplyJson(){
 }
 
 async function nlRun(){
+  if (nlState.mode === 'factor'){
+    if (!nlState.config){ $('nlRunMsg').textContent = '请先解析或应用因子配置'; return; }
+    const cfg = JSON.parse(JSON.stringify(nlState.config));
+    cfg.universe = cfg.universe || {};
+    cfg.universe.id = $('nlUniverse').value || cfg.universe.id || 'A0';
+    cfg.portfolio = cfg.portfolio || {};
+    cfg.portfolio.stock_count = parseInt($('nlTopN').value, 10) || cfg.portfolio.stock_count || 10;
+    $('nlRunBtn').disabled = true;
+    $('nlRunMsg').textContent = '回测中（首次构建研究因子缓存可能较慢）…';
+    try{
+      const r = await fetch('/api/nl/config', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({config: cfg, run: true}),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      renderFactorResult(d.result, d.describe, d.weights);
+      $('nlRunMsg').textContent =
+        `回测完成：年化 ${fmtPct((d.result.metrics.annual_return || 0) * 100)}，评分 ${d.result.scorecard.score}`;
+    }catch(e){
+      $('nlRunMsg').textContent = '回测失败：' + e.message;
+    }finally{
+      $('nlRunBtn').disabled = false;
+    }
+    return;
+  }
   if (!nlState.spec){ $('nlRunMsg').textContent = '请先解析或应用规则'; return; }
   const universe = $('nlUniverse').value || 'C0';
   const topN = parseInt($('nlTopN').value, 10) || 5;
@@ -869,6 +1572,54 @@ async function nlRun(){
   }finally{
     $('nlRunBtn').disabled = false;
   }
+}
+
+function renderFactorResult(res, describe, weights){
+  nlState.result = res;
+  $('nlResultCard').style.display = 'block';
+  const m = res.metrics || {}, o = res.oos || {}, sc = res.scorecard || {};
+  $('nlResultTag').textContent =
+    `${res.universe} · 因子配置 · ${Object.keys(weights || {}).length} 个因子`;
+  $('nlSummary').innerHTML = (describe || []).map(x => `<span class="tag">${x}</span>`).join('');
+  const items = [
+    ['总收益', fmtPct((m.total_return ?? 0) * 100), cls(m.total_return)],
+    ['年化收益', fmtPct((m.annual_return ?? 0) * 100), cls(m.annual_return)],
+    ['年化超额', m.excess_annual == null ? '--' : fmtPct(m.excess_annual * 100), cls(m.excess_annual)],
+    ['夏普', m.sharpe == null ? '--' : Number(m.sharpe).toFixed(2), ''],
+    ['最大回撤', fmtPct((m.max_drawdown ?? 0) * 100), 'down'],
+    ['样本外年化', o.annual_return == null ? '--' : fmtPct(o.annual_return * 100), cls(o.annual_return)],
+    ['评分', sc.score == null ? '--' : sc.score, ''],
+    ['交易成本', m.cost_paid == null ? '--' : fmtPct(m.cost_paid * 100), ''],
+  ];
+  $('nlMetrics').innerHTML = items.map(([k,v,c]) =>
+    `<div class="m"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+
+  const nav = res.nav || [];
+  if (nav.length > 1){
+    const base = nav[0].nav || 1, bbase = nav[0].benchmark || base;
+    chart('nlNavChart').setOption({
+      grid:{left:12,right:20,top:24,bottom:24,containLabel:true},
+      legend:{data:['策略','基准'],right:10,top:0,textStyle:{color:C().axis,fontSize:11},itemWidth:14,itemHeight:8},
+      xAxis:{type:'category',data:nav.map(x=>x.trade_date),boundaryGap:false,...ax(),
+             axisLabel:{...ax().axisLabel,formatter:v=>v.slice(0,7)}},
+      yAxis:{type:'value',scale:true,...ax(),axisLabel:{...ax().axisLabel,formatter:v=>v.toFixed(2)}},
+      tooltip:tip(),
+      series:[
+        {name:'策略',type:'line',smooth:true,symbol:'none',
+         data:nav.map(x=> +(x.nav/base).toFixed(4)),
+         lineStyle:{width:2.2,color:'#6366f1'}},
+        {name:'基准',type:'line',smooth:true,symbol:'none',
+         data:nav.map(x=> +((x.benchmark ?? base)/bbase).toFixed(4)),
+         lineStyle:{width:1.6,color:'#22d3ee',type:'dashed'}}
+      ]
+    }, true);
+  }
+  $('nlTradeTag').textContent = '因子配置模式';
+  $('nlTrades').innerHTML = '<tr><td colspan="7" class="empty">因子配置模式展示组合净值，不展示逐笔成交</td></tr>';
+  $('nlRuleNote').textContent = (sc.reasons && sc.reasons.length)
+    ? '提示：' + sc.reasons.join('；')
+    : '信号在 K 线收盘确认，次一交易日收盘成交；已计入佣金、过户费、印花税与滑点。';
+  setTimeout(() => { if (charts['nlNavChart']) charts['nlNavChart'].resize(); }, 60);
 }
 
 function renderNL(res){
@@ -1008,10 +1759,14 @@ async function nlDelete(id){
   }
 }
 
-$('navNL').onclick = () => { location.hash = '#/nl'; };
+$('navNL').onclick = () => { location.hash = '#/research'; };
+$('psApply').onclick = applyPoolStrategy;
 $('nlParseBtn').onclick = nlParse;
 $('nlApplyJson').onclick = nlApplyJson;
 $('nlRunBtn').onclick = nlRun;
+document.querySelectorAll('#nlModeChips .chip').forEach(b => {
+  b.onclick = () => nlSetMode(b.dataset.mode);
+});
 
 function toggleSec(id){
   const el = $(id);
@@ -1117,6 +1872,51 @@ function renderPoolHeader(){
       + `${p && p.schedule_enabled ? '关闭调度' : '开启调度'}</button>`);
   }
   $('poolOps').innerHTML = ops.join('');
+}
+
+async function loadPoolStrategy(){
+  const id = state.universe;
+  const p = poolOf(id);
+  const cur = (p && p.strategy_id) || 'defensive';
+  $('psTag').textContent = cur;
+  try{
+    if (!researchState.items.length){
+      const r = await fetch('/api/research/strategies?universe=' + encodeURIComponent(id),
+                            {cache:'no-store'});
+      const d = await r.json();
+      if (r.ok) researchState.items = d.items || [];
+    }
+    $('psSelect').innerHTML = researchState.items.map(s =>
+      `<option value="${s.strategy_id}">${s.name}（${s.strategy_id}）</option>`).join('');
+    if ($('psSelect').querySelector(`option[value="${cur}"]`)) $('psSelect').value = cur;
+  }catch(e){
+    $('psMsg').textContent = '策略列表加载失败：' + e.message;
+  }
+}
+
+async function applyPoolStrategy(){
+  const id = state.universe;
+  const sid = $('psSelect').value;
+  if (!sid) return;
+  $('psApply').disabled = true;
+  $('psMsg').textContent = '切换中…';
+  try{
+    const r = await fetch(`/api/pools/${encodeURIComponent(id)}/strategy`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({strategy_id: sid, run: true}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    $('psTag').textContent = sid;
+    $('psMsg').textContent = (d.job && d.job.status === 'running')
+      ? '已切换，池任务运行中…' : '已切换';
+    await loadPools();
+    setTimeout(load, 3000);
+  }catch(e){
+    $('psMsg').textContent = '失败：' + e.message;
+  }finally{
+    $('psApply').disabled = false;
+  }
 }
 
 function renderNavPools(){

@@ -159,6 +159,25 @@ for u in C0 C1 C2 C3; do
 done
 ```
 
+**研究平台数据（可选，需要全 A 研究/因子实验室时才跑）**
+
+```bash
+# 全 A 行情 + 申万行业 + 指数（首次约 1–2 小时，可后台）
+nohup .venv/bin/python -m stock_cash_streaming.cli market \
+      --sync-symbols --backfill --only-missing --workers 10 > logs/market_backfill.log 2>&1 &
+.venv/bin/python -m stock_cash_streaming.cli market --industry
+.venv/bin/python -m stock_cash_streaming.cli market --index
+
+# 现金流量表 / 资产负债表（逐股请求，可后台）
+nohup .venv/bin/python -m stock_cash_streaming.cli market \
+      --statements --only-missing --workers 20 > logs/statements.log 2>&1 &
+
+# 覆盖度自检
+.venv/bin/python -m stock_cash_streaming.cli market --index
+```
+
+> 研究因子按需计算并缓存到 `data/research_cache/`（TTL 7 天），不落 SQLite；删目录即强制重算。
+
 ### 1.5 放行端口
 
 - 腾讯云控制台 → 安全组 → 入站规则 → 放行 **TCP 8000**；
@@ -264,10 +283,14 @@ cd /opt/stock-cash-streaming
 .venv/bin/python -m stock_cash_streaming.cli recover --dry-run
 .venv/bin/python -m stock_cash_streaming.cli recover --lookback 30
 .venv/bin/python -m stock_cash_streaming.cli fundamentals    # 财务/分红（C0+C1）
+.venv/bin/python -m stock_cash_streaming.cli market --index  # 全 A 数据底座覆盖度（含行业/指数/财报）
+.venv/bin/python -m stock_cash_streaming.cli strat backtest --strategy value_quality --universe A0
 .venv/bin/python -m pytest -q                                # 测试
 
 tail -f logs/web.log
 tail -f logs/scheduler.log
+tail -f logs/market_backfill.log
+tail -f logs/statements.log
 tail -f logs/app_$(date +%F).log
 ```
 
@@ -284,10 +307,10 @@ tail -f logs/app_$(date +%F).log
 | 改代码页面没变 | Web 是否带 `--reload`；调度器需手动重启；浏览器硬刷新 |
 | 自定义股票池在哪 | 左侧导航「总览」→ 股票池卡片区：新建池（输入代码→解析名称→确认）、改名、增删成员、启动/更新、开关每日调度；内置 C0~C3 只读 |
 | 模拟持仓在哪 | 任意池详情页「③ 模拟持仓（10 万）」；首次点「初始化账户」回放该池历史（约 10–30 秒 / 池），之后每日自动跟随；也可 `cli paper --universe C1 --reset` |
-| 策略研究（自然语言策略）在哪 | 左侧导航「研究 → 策略研究」（`#/nl`）：输入中文规则 → 解析 → 选池回测 → 可保存；LLM 用 `.env` 的 `OPENAI_API_KEY/OPENAI_BASE_URL/LLM_MODEL`，未配置时可手动编辑 JSON，或 `cli nl --spec-file spec.json --universe C0` |
+| 策略研究（研究 Hub）在哪 | 左侧导航「研究 → 策略研究」（`#/research`）：策略库 / 策略对比 / 因子实验室 / 因子择时 / 自然语言 五个 Tab；旧链接 `#/nl` 自动跳转。全 A 数据底座（行情/行业/指数/财报）按 runbook 5.1 维护，研究因子缓存在 `data/research_cache/` |
 | 调度器没触发 | `tmux a -t scs` 看进程；确认时区 |
 | 920010 拉取失败 | 北交所接口不支持，属预期 |
-| 磁盘不足 | 当前库约 1.8 GB，备份同体积，建议 40 GB+ |
+| 磁盘不足 | 当前库约 2.9 GB（含全 A 行情），研究因子缓存约 10 MB，备份同体积，建议 50 GB+ |
 
 ---
 

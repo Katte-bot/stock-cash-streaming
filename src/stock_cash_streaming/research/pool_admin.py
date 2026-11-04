@@ -244,6 +244,7 @@ def get_pool(repo: Repository, pool_id: str) -> dict:
         "is_custom": bool(row["is_custom"]),
         "readonly": not bool(row["is_custom"]),
         "daily_enabled": bool(row["daily_enabled"]),
+        "strategy_id": row.get("strategy_id", "defensive"),
         "members_updated_at": row["members_updated_at"],
         "members_count": len(member_rows),
         "members": member_rows,
@@ -255,6 +256,7 @@ def list_pools(repo: Repository) -> list[dict]:
     latest = repo.query("SELECT MAX(trade_date) AS d FROM fact_quote")[0]["d"]
     rows = [dict(r) for r in repo.query(
         """SELECT * FROM dim_universe
+           WHERE universe_id != 'A0'
            ORDER BY CASE WHEN universe_id='C0' THEN 0 ELSE 1 END, universe_id""")]
     today = datetime.now().strftime("%Y%m%d")
     out: list[dict] = []
@@ -280,8 +282,8 @@ def list_pools(repo: Repository) -> list[dict]:
 
         bt_rows = repo.query(
             "SELECT run_id, strategy, end_date, created_at FROM backtest_run "
-            "WHERE strategy=? ORDER BY created_at DESC LIMIT 1",
-            (backtest_strategy_name(pid),))
+            "WHERE strategy LIKE ? ORDER BY created_at DESC LIMIT 1",
+            (f"%_{pid}",))
         bt = dict(bt_rows[0]) if bt_rows else None
         if not bt:
             backtest_state = "missing"
@@ -333,6 +335,7 @@ def list_pools(repo: Repository) -> list[dict]:
             "description": row["description"] or "",
             "is_custom": bool(row["is_custom"]),
             "readonly": not bool(row["is_custom"]),
+            "strategy_id": row.get("strategy_id", "defensive"),
             "members_count": len(members),
             "data_state": data_state,
             "data_as_of": data_as_of,

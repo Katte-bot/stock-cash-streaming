@@ -322,6 +322,104 @@ CREATE TABLE IF NOT EXISTS dim_nl_strategy (
     updated_at   TEXT
 );
 
+-- ===== 策略研究平台（2026-11 升级）=====
+
+-- 策略注册表（与代码 registry 同步）
+CREATE TABLE IF NOT EXISTS dim_strategy (
+    strategy_id   TEXT PRIMARY KEY,
+    name          TEXT,
+    category      TEXT,                 -- fundamental / price / event / meta / rule
+    description   TEXT,
+    spec_json     TEXT,                 -- 默认参数、依赖因子
+    status        TEXT DEFAULT 'research',  -- research / candidate / production
+    created_at    TEXT,
+    updated_at    TEXT
+);
+
+-- 策略回测记录（一次运行一行；逐日净值复用 backtest_result）
+CREATE TABLE IF NOT EXISTS fact_strategy_run (
+    run_id        TEXT PRIMARY KEY,
+    strategy_id   TEXT,
+    universe_id   TEXT,
+    start_date    TEXT,
+    end_date      TEXT,
+    oos_start     TEXT,
+    params_json   TEXT,
+    metrics_json  TEXT,                 -- 全样本 + OOS + 分年 + 分状态
+    score         REAL,
+    created_at    TEXT
+);
+
+-- 因子 IC 快照
+CREATE TABLE IF NOT EXISTS fact_factor_ic (
+    factor      TEXT,
+    universe_id TEXT,
+    trade_date  TEXT,
+    horizon     INTEGER,
+    ic          REAL,
+    rank_ic     REAL,
+    n           INTEGER,
+    PRIMARY KEY (factor, universe_id, trade_date, horizon)
+);
+
+-- 市场状态
+CREATE TABLE IF NOT EXISTS fact_regime_state (
+    trade_date   TEXT PRIMARY KEY,
+    trend        TEXT,                 -- up / range / down
+    vol_state    TEXT,                 -- low / mid / high
+    breadth      REAL,
+    amount_chg   REAL,
+    style        TEXT
+);
+
+-- 因子动量权重
+CREATE TABLE IF NOT EXISTS fact_strategy_weight (
+    trade_date   TEXT,
+    strategy_id  TEXT,
+    weight       REAL,
+    reason       TEXT,
+    PRIMARY KEY (trade_date, strategy_id)
+);
+
+-- 指数行情（基准与市场收益）
+CREATE TABLE IF NOT EXISTS fact_index_quote (
+    index_code  TEXT,
+    trade_date  TEXT,
+    close       REAL,
+    pct_chg     REAL,
+    PRIMARY KEY (index_code, trade_date)
+);
+
+-- 财报事件（PEAD 审计用）
+CREATE TABLE IF NOT EXISTS fact_earnings_event (
+    symbol           TEXT,
+    stat_date        TEXT,
+    pub_date         TEXT,
+    sue              REAL,
+    revenue_surprise REAL,
+    announce_ret_1d  REAL,
+    PRIMARY KEY (symbol, stat_date)
+);
+
+-- 全 A 行业分类（申万一级/二级/三级）
+CREATE TABLE IF NOT EXISTS dim_stock_industry (
+    symbol      TEXT PRIMARY KEY,
+    level1      TEXT,
+    level2      TEXT,
+    level3      TEXT,
+    src         TEXT,
+    updated_at  TEXT
+);
+
+-- 股票池成员快照（每月一次，降低未来幸存者偏差）
+CREATE TABLE IF NOT EXISTS dim_universe_member_history (
+    universe_id TEXT,
+    trade_date  TEXT,
+    symbol      TEXT,
+    sector_code TEXT,
+    PRIMARY KEY (universe_id, trade_date, symbol)
+);
+
 -- ===== 运维表 =====
 
 -- 数据水位（驱动增量）
@@ -353,3 +451,7 @@ CREATE INDEX IF NOT EXISTS idx_fin_pub          ON fact_financial(symbol, pub_da
 CREATE INDEX IF NOT EXISTS idx_fin_rev          ON fact_financial_revision(symbol, stat_date);
 CREATE INDEX IF NOT EXISTS idx_div_announce     ON fact_dividend(symbol, announce_date);
 CREATE INDEX IF NOT EXISTS idx_universe_member  ON dim_universe_member(universe_id);
+CREATE INDEX IF NOT EXISTS idx_quote_symbol     ON fact_quote(symbol, trade_date);
+CREATE INDEX IF NOT EXISTS idx_index_quote      ON fact_index_quote(index_code, trade_date);
+CREATE INDEX IF NOT EXISTS idx_ic_factor        ON fact_factor_ic(factor, trade_date);
+CREATE INDEX IF NOT EXISTS idx_strategy_run     ON fact_strategy_run(strategy_id, universe_id, created_at);

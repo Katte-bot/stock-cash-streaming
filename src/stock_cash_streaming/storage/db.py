@@ -39,6 +39,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("is_custom", "INTEGER NOT NULL DEFAULT 0"),
         ("daily_enabled", "INTEGER NOT NULL DEFAULT 0"),
         ("members_updated_at", "TEXT"),
+        ("strategy_id", "TEXT NOT NULL DEFAULT 'defensive'"),
     ):
         if col not in ucols:
             conn.execute(f"ALTER TABLE dim_universe ADD COLUMN {col} {ddl}")
@@ -52,11 +53,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
            ON CONFLICT(universe_id) DO NOTHING"""
     )
 
+    # A0：全 A 研究池（不参与每日池任务，仅用于研究回测）
+    conn.execute(
+        """INSERT INTO dim_universe
+               (universe_id, name, description, updated_at, is_custom, daily_enabled, strategy_id)
+           VALUES ('A0', 'A0 全 A 研究池', '全 A 可交易股票，按流动性动态过滤',
+                   datetime('now','localtime'), 0, 0, 'value_quality')
+           ON CONFLICT(universe_id) DO NOTHING"""
+    )
+
+    # 回测记录补充指标快照列（旧库）
+    bcols = {r["name"] for r in conn.execute("PRAGMA table_info(backtest_run)")}
+    if bcols and "metrics_json" not in bcols:
+        conn.execute("ALTER TABLE backtest_run ADD COLUMN metrics_json TEXT")
+
     # 一次性迁移（user_version=2）：所有股票池默认纳入每日池任务，
     # 保证“数据 + 因子 + 回测 + 组合/跟踪”每天都跟随最新行情刷新。
     if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
-        conn.execute("UPDATE dim_universe SET daily_enabled=1")
+        conn.execute("UPDATE dim_universe SET daily_enabled=1 WHERE universe_id <> 'A0'")
         conn.execute("PRAGMA user_version=2")
+    # A0 是研究池，永不参与每日池任务（修复历史库里可能被误开的情况）
+    conn.execute("UPDATE dim_universe SET daily_enabled=0 WHERE universe_id='A0'")
 
     # 模拟持仓：账户表增加折算比例列（旧库补列）
     pcols = {r["name"] for r in conn.execute("PRAGMA table_info(fact_paper_account)")}

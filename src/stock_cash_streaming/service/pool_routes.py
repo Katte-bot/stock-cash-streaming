@@ -51,6 +51,11 @@ class ScheduleToggle(BaseModel):
     enabled: bool
 
 
+class StrategyBind(BaseModel):
+    strategy_id: str
+    run: bool = True
+
+
 def _call(fn):
     """统一把业务异常映射为 HTTP 状态码。"""
     try:
@@ -84,6 +89,37 @@ def pools() -> dict:
 @router.get("/{pool_id}")
 def pool_detail(pool_id: str) -> dict:
     return _with_repo(lambda repo: get_pool(repo, pool_id))
+
+
+@router.post("/{pool_id}/strategy")
+def bind_strategy(pool_id: str, payload: StrategyBind) -> dict:
+    """为股票池绑定研究策略；可选立即触发一次池任务。"""
+    from datetime import datetime
+
+    from ..strategy.registry import ensure_registered, get as get_strategy
+
+    ensure_registered()
+    spec = get_strategy(payload.strategy_id)
+    if spec is None:
+        raise HTTPException(status_code=400, detail=f"未知策略：{payload.strategy_id}")
+    if pool_id == "A0":
+        raise HTTPException(status_code=400, detail="A0 为研究池，不能绑定策略")
+
+    def _run(repo):
+        rows = repo.query("SELECT 1 FROM dim_universe WHERE universe_id=?", (pool_id,))
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"股票池不存在：{pool_id}")
+        repo.conn.execute(
+            "UPDATE dim_universe SET strategy_id=?, updated_at=? WHERE universe_id=?",
+            (payload.strategy_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pool_id),
+        )
+        repo.conn.commit()
+        return get_pool(repo, pool_id)
+
+    out = _with_repo(_run)
+    if payload.run:
+        out["job"] = start_pool_job(pool_id)
+    return out
 
 
 @router.post("/resolve")

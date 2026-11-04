@@ -146,6 +146,36 @@ PY
 - 重放顺序必须从早到晚，否则「持仓缓冲 1 名」和「相对上次调仓的变化」会算错
 - `tracking` 每次从首个快照完整重算，不需要删除旧净值
 
+### 5.1 研究平台（全 A + 策略库）数据维护
+
+研究平台依赖额外数据底座，与每日池任务解耦，按需执行（首次部署或数据缺失时）：
+
+```bash
+# 1) 全 A 股票列表 + 行情回填（多线程、单票断点续跑；可后台跑）
+nohup .venv/bin/python -m stock_cash_streaming.cli market \
+      --sync-symbols --backfill --only-missing --workers 10 > logs/market_backfill.log 2>&1 &
+
+# 2) 申万行业分类（一次请求，约 5500 只）
+.venv/bin/python -m stock_cash_streaming.cli market --industry
+
+# 3) 指数行情（沪深300/中证500/1000/全指）
+.venv/bin/python -m stock_cash_streaming.cli market --index
+
+# 4) 现金流量表 / 资产负债表关键科目（逐股请求，建议后台跑）
+nohup .venv/bin/python -m stock_cash_streaming.cli market \
+      --statements --only-missing --workers 20 > logs/statements.log 2>&1 &
+
+# 5) 查看覆盖度（命令末尾会自动打印）
+.venv/bin/python -m stock_cash_streaming.cli market --index
+```
+
+要点：
+
+- 研究因子不写 SQLite 日频，缓存在 `data/research_cache/*.pkl`（TTL 7 天）。怀疑因子口径变化或想强制重算时，直接删该目录即可，回测会自动重建；
+- 研究池 `A0`（全 A）不参与每日池任务与模拟持仓，仅用于研究和回测；
+- 研究回测走 `cli strat backtest --strategy value_quality --universe A0 --start 2018-01-01`，结果落 `fact_strategy_run`；因子 IC 走 `cli strat ic --universe A0`，落 `fact_factor_ic`；
+- 日志：`logs/market_backfill.log`、`logs/statements.log`；两个任务都会写 SQLite，尽量避让 `daily/recover`。
+
 ---
 
 ## 6. 恢复后校验
@@ -252,3 +282,4 @@ PY
 | 2026-10-20 | 首版：新增 `cli recover`、中断恢复流程、备份与常见问题 |
 | 2026-10-29 | 补充池任务（自定义股票池）状态查看与重试说明 |
 | 2026-11-02 | 模拟持仓（`/api/paper`）与自然语言策略（`/api/nl`）的排查条目 |
+| 2026-11-04 | 新增 5.1 研究平台数据维护（全 A 行情/行业/指数/财报、因子缓存、`cli market` / `cli strat`） |

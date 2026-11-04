@@ -36,6 +36,13 @@ class BacktestIn(BaseModel):
     nl_text: str | None = None
 
 
+class ConfigIn(BaseModel):
+    text: str | None = None
+    config: dict | None = None
+    run: bool = True
+    force_refresh: bool = False
+
+
 def _with_repo(fn):
     repo = open_repository()
     try:
@@ -86,6 +93,33 @@ def backtest(payload: BacktestIn) -> dict:
 @router.get("/strategies")
 def strategies() -> dict:
     return {"items": _with_repo(list_strategies)}
+
+
+@router.post("/config")
+def nl_config(payload: ConfigIn) -> dict:
+    """自然语言 → 因子配置 → 确定性回测。"""
+    from ..research.nl_config import (
+        config_to_weights,
+        describe_config,
+        parse_nl_config,
+        run_config,
+        validate_config,
+    )
+
+    def _run(repo):
+        if payload.config:
+            cfg = validate_config(payload.config)
+        elif payload.text:
+            cfg = parse_nl_config(payload.text)
+        else:
+            raise HTTPException(status_code=400, detail="请提供 text 或 config")
+        weights = config_to_weights(cfg)
+        out = {"config": cfg, "weights": weights, "describe": describe_config(cfg)}
+        if payload.run:
+            out.update(run_config(repo, cfg, force_refresh=payload.force_refresh))
+        return out
+
+    return _guard(lambda: _with_repo(_run))
 
 
 @router.get("/strategies/{strategy_id}")

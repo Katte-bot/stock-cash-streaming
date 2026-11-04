@@ -795,6 +795,45 @@ python -m stock_cash_streaming.cli experiments --universe C0
 
 **局限**：仅 `all` 组合、无参数优化/策略对比/组合级仓位管理；周线重采样不含节假日对齐；结果依赖后复权行情与整手约束。
 
+### 22.19 策略研究平台（2026-11-04）
+
+**目标**：把「单策略 + 单股票池」升级为可扩展的研究平台：全 A 研究池、因子注册表、策略库、统一回测器、因子实验室（IC）、因子择时与自然语言因子配置。
+
+**数据底座（`cli market`）**
+- 全 A 列表：`ak.stock_zh_a_spot_tx`（过滤 `GP-A*`，约 5200 只）；行情 `ak.stock_zh_a_hist(adjust="hfq")`，多线程 10 并发、单票 watermark 断点续跑；
+- 行业：申万 2021 分类。`sw_index_*` 接口已失效，改为一次下载申万宏源分类明细 xls（`StockClassifyUse_stock.xls`，需跳过 SSL 校验），按「计入日期」取每股最新一条；6 位行业代码前 2 位 = 一级（静态映射 31 个一级名称）、前 4 位 = 二级、6 位 = 三级；
+- 指数：`sh000300 / sh000905 / sh000852 / sh000985` 入 `fact_index_quote`（市场环境与超额基准）；
+- 财务报表：`stock_financial_report_sina` 拉现金流量表 + 资产负债表，补充 `capex / dividends_paid / total_assets / total_liabilities / short_debt / long_debt / bond_payable`（`pub_date` 取公告日，缺失用法定披露截止日兜底）；`sync_statements` 支持多线程，写入统一在主线程。
+- 研究池 `A0`：`daily_enabled=0`，不参与每日池任务与模拟持仓；面板默认上市 ≥250 日、20 日均额 ≥2000 万。
+
+**因子体系（`features/registry.py`，68 个）**
+- v2（19，已落 `fact_factor`）：收益/趋势/反转/波动/流动性/资金流；
+- v3（12，已落 `fact_factor`）：ROE、现金流质量、杠杆、EP/BP、FCF、股息；
+- v4（20，按需计算）：`vol_60/120/250`、`downside_vol_120`、`beta_250`、`ivol_60`、`ret_60/120/200`、`resid_mom_126/252`（剔除最近 21 日）、`resid_ret_5/10/20`、`ts_trend_60/120`、`dist_high_60`、`lower_shadow_20`、`volume_shrink_5_20`、`amihud_std_20`；
+- v5（17，按需计算）：`roa_ttm`、`roic`、`gross_margin`、`net_margin`、`accruals`、`total_assets`、`size_mcap`、`cfo_yield`、`asset_growth`、`asset_turnover_change`、`capex_growth`、`capex_to_assets`、`investment_intensity`、`sue`、`revenue_surprise`、`announce_ret_1d`、`attention_20`。
+- 研究因子**不写 SQLite 日频**（全 A 约 3–4 亿行），统一走 `features/cache.py` 的 pickle 缓存（键 = 版本 + 池 + 区间 + 股票集合哈希，TTL 7 天）。
+
+**横截面处理（`strategy/scoring.py`）**：1%/99% 缩尾 → 逐日 z-score → 申万一级行业中性（缺失回退 THS 板块代码）→ 按注册表 `higher_is_better` 自动取符号加权合成。
+
+**策略库（`strategy/library.py`，8 个）**：`value_quality`、`residual_momentum`、`conservative_investment`、`pead`、`factor_momentum`（20 交易日评估，0.5·Sharpe6M + 0.3·Sharpe12M + 0.2·Sharpe3M，单策略上限 40%）、`low_vol_multidim`、`defensive`（生产基线）、`nl_factor`（自然语言因子配置）。
+- 统一回测器 `research/runner.py`：`run_strategy(...)` 输出年化/波动/夏普/最大回撤/Calmar/超额/换手/分年度，并按 25% CAGR + 20% Sharpe + 15% Calmar + 15% MDD + 15% 超额 + 10% OOS 生成评分卡；样本外默认起点 `2024-01-01`；结果落 `fact_strategy_run`。
+- 因子择时权重落 `fact_strategy_weight`，市场状态（沪深300 趋势 + 波动分位）落 `fact_regime_state`。
+
+**接口**：`GET /api/research/strategies`、`GET /api/research/strategies/{id}`、`POST /api/research/strategies/{id}/backtest`、`POST /api/research/compare`、`GET /api/research/factors`、`GET /api/research/factors/{name}/ic`、`GET /api/research/regime`、`GET /api/research/meta/weights`、`POST /api/nl/config`、`POST /api/pools/{id}/strategy`（绑定策略并可选立即跑一次池任务）。
+**CLI**：`cli market`（`--sync-symbols/--backfill/--industry/--index/--statements`）、`cli strat list|backtest|compare|ic|meta`。
+
+**页面**：左侧「策略研究」→ 研究 Hub，顶部 5 个 Tab（策略库 / 策略对比 / 因子实验室 / 因子择时 / 自然语言），全局样本域下拉（A0/C0~C3/自建池）。策略卡片可查看详情（KPI、分年度、净值曲线、评分卡）并实时回测；对比 Tab 输出归一化净值与相关性矩阵；因子实验室展示 IC/ICIR/正向占比与分组收益；自然语言 Tab 支持「规则模式（原 DSL）」与「因子配置模式（白名单因子组 + 权重）」双模式。
+
+**首轮实测（C1，2018-01-02 ~ 2026-11-02）**：value_quality 5.22%/0.33、residual_momentum 11.08%/0.59、conservative_investment 7.18%/0.41、pead 4.08%/0.29、defensive 9.59%/0.54、factor_momentum 7.73%/0.43、nl_factor 9.37%/0.49（年化/夏普）。IC 排名靠前：`asset_turnover_change` −0.1498、`vol_60` −0.1371、`div_yield_3y` +0.1310、`fcf_yield` +0.1163。
+
+**测试**：新增 `tests/test_research_platform.py`（19 项，覆盖注册表、v4 无未来函数与残差动量剔除近月、v5 报告期派生指标与公告时点对齐、缩尾/Z/行业中性、策略构建、因子动量权重上限、IC 识别能力、NL 配置校验），全量 `pytest` 59 项通过。
+
+**已知限制**
+- 小池（如 C1 8 只）分组收益样本不足（要求每组 ≥5 只、合计 ≥50 只），分组图仅在全 A 池有意义；
+- `factor_momentum` 依赖候选策略历史，早期日期会退化为等权；
+- 财报回填为逐股请求，全 A 首次回填耗时较长（后台任务）；
+- 行业中性仅一级行业，未做二级/三级中性；行业为静态最新分类，不含历史变更。
+
 
 
 
