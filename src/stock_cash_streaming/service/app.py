@@ -242,28 +242,88 @@ def universe_performance() -> dict:
 @app.get("/api/portfolio")
 def portfolio(trade_date: str | None = None, strategy: str = "defensive",
               universe: str = "C0") -> dict:
-    """目标组合与调仓清单（防御型策略，实盘跟踪口径）。"""
+    """目标组合与调仓清单（防御型策略实时计算；研究策略读取回测快照）。"""
+    from ..research.pool_admin import pool_strategy_id
     from ..strategy.portfolio import build_target_portfolio
 
     repo = open_repository()
     try:
+        sid = pool_strategy_id(repo, universe)
+        if sid != "defensive":
+            return _snapshot_portfolio(repo, universe, sid, trade_date)
         return build_target_portfolio(repo, trade_date=trade_date, persist=False,
                                       strategy=strategy, universe_id=universe)
     finally:
         repo.close()
 
 
+def _snapshot_portfolio(repo, universe: str, strategy_id: str,
+                        trade_date: str | None) -> dict:
+    """研究策略：读取最近一次调仓快照（由 research.runner 写入）。"""
+    from ..research.pool_admin import portfolio_target_name
+
+    name = portfolio_target_name(universe, strategy_id)
+    if trade_date is None:
+        rows = repo.query(
+            "SELECT MAX(trade_date) AS d FROM fact_target_run WHERE strategy=?", (name,))
+        trade_date = rows[0]["d"] if rows else None
+    if not trade_date:
+        return {"error": "该池尚未生成研究策略组合", "strategy": name}
+    head = repo.query(
+        "SELECT * FROM fact_target_run WHERE strategy=? AND trade_date=?", (name, trade_date))
+    rows = repo.query(
+        "SELECT p.symbol, IFNULL(s.name,'') AS name, p.weight, p.raw_weight, p.is_rebalance "
+        "FROM fact_target_portfolio p LEFT JOIN dim_stock s ON s.symbol=p.symbol "
+        "WHERE p.strategy=? AND p.trade_date=? ORDER BY p.weight DESC", (name, trade_date))
+    positions = [{"symbol": r["symbol"], "name": r["name"], "sector": "",
+                  "score": None, "vol_20": None,
+                  "raw_weight": r["raw_weight"], "weight": r["weight"], "note": "研究策略"}
+                 for r in rows]
+    prev = repo.query(
+        "SELECT MAX(trade_date) AS d FROM fact_target_run "
+        "WHERE strategy=? AND trade_date<?", (name, trade_date))
+    prev_date = prev[0]["d"] if prev else None
+    prev_w = {r["symbol"]: float(r["weight"]) for r in repo.query(
+        "SELECT symbol, weight FROM fact_target_portfolio WHERE strategy=? AND trade_date=?",
+        (name, prev_date))} if prev_date else {}
+    cur = {p["symbol"]: p["weight"] for p in positions}
+    changes = {
+        "type": "initial" if not prev_date else "rebalance",
+        "added": [{"symbol": s, "name": ""} for s in cur if s not in prev_w],
+        "removed": [{"symbol": s, "name": ""} for s in prev_w if s not in cur],
+        "weight_changes": [{"symbol": s, "from": prev_w[s], "to": cur[s],
+                            "delta": round(cur[s] - prev_w[s], 4)}
+                           for s in cur if s in prev_w and abs(cur[s] - prev_w[s]) >= 0.005],
+    }
+    return {
+        "trade_date": trade_date,
+        "strategy": name,
+        "strategy_kind": strategy_id,
+        "execute_at": "次一交易日收盘",
+        "action": "hold" if prev_date else "initial",
+        "is_rebalance_day": bool(head[0]["is_rebalance"]) if head else False,
+        "exposure": head[0]["exposure"] if head else round(sum(cur.values()), 4),
+        "positions": positions, "changes": changes,
+        "names": {p["symbol"]: p["name"] for p in positions},
+    }
+
+
 @app.get("/api/tracking")
 def tracking(start_date: str | None = None, strategy: str = "defensive",
              universe: str = "C0") -> dict:
     """模拟跟踪净值（按调仓快照 + 真实收盘价）。"""
+    from ..research.pool_admin import pool_strategy_id, portfolio_target_name
     from ..strategy.portfolio import STRATEGY_NAMES
     from ..strategy.tracking import simulate_tracking
 
-    base = STRATEGY_NAMES.get(strategy, strategy)
-    name = base if universe == "C0" else f"{base}_{universe}"
     repo = open_repository()
     try:
+        sid = pool_strategy_id(repo, universe)
+        if sid != "defensive":
+            name = portfolio_target_name(universe, sid)
+        else:
+            base = STRATEGY_NAMES.get(strategy, strategy)
+            name = base if universe == "C0" else f"{base}_{universe}"
         # C0 保持历史基准（板块成分）；其它池用自身成员等权作为基准
         return simulate_tracking(repo, strategy=name, start_date=start_date, persist=False,
                                  universe_id=None if universe == "C0" else universe)

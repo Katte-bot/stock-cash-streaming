@@ -262,3 +262,123 @@ def test_nl_config_rejects_invalid(payload, msg):
     with pytest.raises(SpecError) as e:
         nl_config.validate_config(payload)
     assert msg in str(e.value)
+
+
+# ---------- 回测约束与稳健性 ----------
+
+def test_v4_all_factors_no_lookahead():
+    panel = _panel(n_days=420)
+    full = compute_v4(panel)
+    t = panel.dates[-40]
+    trunc = compute_v4(panel.slice(end=t))
+    assert set(full) == set(trunc)
+    for name in full:
+        a = full[name].loc[t].to_numpy(dtype=float)
+        b = trunc[name].loc[t].to_numpy(dtype=float)
+        assert np.allclose(a, b, equal_nan=True), f"未来函数泄漏: {name}"
+
+
+def test_capacity_constraint_caps_weight(repo):
+    from stock_cash_streaming.backtest.engine import run_backtest
+
+    panel = _panel(n_days=90, n_sym=2)
+    symbols = list(panel.close.columns)
+    score = pd.DataFrame(np.nan, index=panel.close.index, columns=symbols)
+    score.iloc[:, 0] = 10.0                      # 只买第一只
+    score.iloc[:, 1] = 1.0
+    amount = panel.amount.copy()
+    amount.iloc[:, 0] = 1_000_000.0              # 20 日均额 100 万 → 上限 1% = 1 万
+    amount.iloc[:, 1] = 1e9
+    res = run_backtest(
+        repo, top_k=1, rebalance="monthly", persist=False,
+        score_override=score,
+        panel={**{"close": panel.close, "ret": panel.ret, "pct": panel.pct,
+                  "piv": {"vol_20": pd.DataFrame(20.0, index=panel.close.index,
+                                                 columns=symbols)},
+                  "sector_map": {}, "st_symbols": set(), "eligibility": panel.eligibility,
+                  "amount": amount}},
+        initial_capital=1_000_000, cost_model="a_share", limit_model="board",
+        capacity_pct=0.01, return_weights=True,
+    )
+    w = res["weights"]
+    assert float(w.max().max()) <= 0.0105        # 单票被容量上限约束
+    assert res["metrics"]["avg_exposure"] < 0.05
+
+
+def test_walkforward_segments():
+    from stock_cash_streaming.research.walkforward import summarize, walk_forward
+
+    dates = pd.bdate_range("2019-01-01", "2025-12-31").strftime("%Y-%m-%d")
+    nav = pd.Series(np.linspace(1.0, 2.0, len(dates)), index=dates)
+    bench = pd.Series(np.linspace(1.0, 1.3, len(dates)), index=dates)
+    segs = walk_forward(nav, bench)
+    assert len(segs) == 4                        # 2022/2023/2024/2025
+    assert all({"test_start", "test_end", "test_annual", "passed"} <= set(s) for s in segs)
+    summary = summarize(segs)
+    assert summary["segments"] == 4 and 0 <= summary["pass_rate"] <= 1
+
+
+def test_strategy_registry_rejects_duplicate():
+    dup = registry.StrategySpec(id="value_quality", name="x", category="test",
+                                description="")
+    with pytest.raises(ValueError):
+        registry.register(dup)
+
+
+# ---------- 池输出与数据快照 ----------
+
+def test_sync_pool_outputs_writes_snapshots(repo, monkeypatch):
+    from stock_cash_streaming.research import runner as runner_mod
+    from stock_cash_streaming.strategy import paper as paper_mod
+    from stock_cash_streaming.strategy import tracking as tracking_mod
+
+    calls: dict = {}
+    monkeypatch.setattr(tracking_mod, "simulate_tracking",
+                        lambda *a, **kw: calls.setdefault("tracking", "running") and {})
+    monkeypatch.setattr(paper_mod, "refresh_paper_account",
+                        lambda *a, **kw: calls.setdefault("paper", "ok") and {})
+    dates = ["2024-01-02", "2024-02-01"]
+    weights = pd.DataFrame([[0.6, 0.4], [0.5, 0.5]], index=dates, columns=["600000", "600001"])
+    res = {"weights": weights, "rebalance_dates": dates}
+    out = runner_mod._sync_pool_outputs(repo, "C1", "value_quality", res)
+    assert out["snapshots"] == 2 and out["target_strategy"] == "value_quality_C1"
+    runs = repo.query("SELECT * FROM fact_target_run WHERE strategy='value_quality_C1'")
+    rows = repo.query("SELECT * FROM fact_target_portfolio WHERE strategy='value_quality_C1'")
+    assert len(runs) == 2 and len(rows) == 4
+    assert abs(sum(r["weight"] for r in rows if r["trade_date"] == dates[0]) - 1.0) < 1e-6
+
+
+def test_snapshot_members_monthly_idempotent(repo):
+    from stock_cash_streaming.research.universe import snapshot_members
+
+    repo.upsert("dim_universe", [{"universe_id": "C1", "name": "C1"}], ["universe_id"])
+    repo.upsert("dim_universe_member",
+                [{"universe_id": "C1", "symbol": s, "sector_code": "S1"}
+                 for s in ("600000", "600001", "600002")],
+                ["universe_id", "symbol"])
+    repo.upsert("fact_quote", [
+        {"symbol": s, "trade_date": d, "close": 10.0, "pct_chg": 0.0}
+        for d in ("2024-05-06", "2024-05-07") for s in ("600000", "600001", "600002")
+    ], ["symbol", "trade_date"])
+    first = snapshot_members(repo, ["C1"])
+    assert first["trade_date"] == "2024-05-06" and first["pools"]["C1"] == 3
+    second = snapshot_members(repo, ["C1"])
+    assert second["rows"] == 0
+    assert len(repo.query("SELECT * FROM dim_universe_member_history")) == 3
+
+
+def test_sync_earnings_events(repo):
+    from stock_cash_streaming.features.fundamental_v5 import sync_earnings_events
+
+    repo.upsert("fact_financial", _fin_rows(), ["symbol", "stat_date", "metric"])
+    dates = pd.bdate_range("2022-01-03", "2025-12-31").strftime("%Y-%m-%d")
+    repo.upsert("fact_quote", [
+        {"symbol": "600000", "trade_date": d, "close": 10.0,
+         "pct_chg": 1.0 if i % 3 else -1.0}
+        for i, d in enumerate(dates)
+    ], ["symbol", "trade_date"])
+    out = sync_earnings_events(repo, ["600000"])
+    assert out["rows"] >= 8
+    rows = repo.query("SELECT * FROM fact_earnings_event WHERE symbol='600000'")
+    assert any(r["announce_ret_1d"] is not None for r in rows)
+    assert all(r["pub_date"] for r in rows)

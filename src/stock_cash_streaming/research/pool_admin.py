@@ -51,6 +51,19 @@ def portfolio_strategy_name(pool_id: str) -> str:
     return BASE_STRATEGY_NAME if pool_id == C0 else f"{BASE_STRATEGY_NAME}_{pool_id}"
 
 
+def portfolio_target_name(pool_id: str, strategy_id: str | None) -> str:
+    """目标组合落库名：防御基线沿用旧命名，研究策略为 `{strategy_id}_{pool}`。"""
+    if not strategy_id or strategy_id == "defensive":
+        return portfolio_strategy_name(pool_id)
+    return f"{strategy_id}_{pool_id}"
+
+
+def pool_strategy_id(repo: Repository, pool_id: str) -> str:
+    """读取池绑定的策略 id（缺失回落 defensive）。"""
+    rows = repo.query("SELECT strategy_id FROM dim_universe WHERE universe_id=?", (pool_id,))
+    return (rows[0]["strategy_id"] if rows and rows[0]["strategy_id"] else "defensive")
+
+
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

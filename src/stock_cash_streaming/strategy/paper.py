@@ -25,7 +25,7 @@ import pandas as pd
 
 from ..backtest.engine import run_backtest
 from ..common.logging import logger
-from ..research.pool_admin import portfolio_strategy_name
+from ..research.pool_admin import pool_strategy_id, portfolio_target_name
 from ..research.universe import C0, eligibility_panel, universe_members
 from ..storage.repository import Repository
 
@@ -255,7 +255,7 @@ def _events_from_weights(weights: pd.DataFrame | None, source: str = "backtest")
 def _events_from_snapshots(repo: Repository, universe_id: str,
                            after_date: str | None) -> list[dict]:
     """目标组合调仓快照 → 事件（信号日次一交易日收盘执行）。"""
-    strategy = portfolio_strategy_name(universe_id)
+    strategy = portfolio_target_name(universe_id, pool_strategy_id(repo, universe_id))
     rows = repo.query(
         "SELECT trade_date, symbol, weight FROM fact_target_portfolio "
         "WHERE strategy=? AND is_rebalance=1 ORDER BY trade_date, symbol", (strategy,))
@@ -460,20 +460,25 @@ def _rebuild(repo: Repository, universe_id: str, capital: float) -> dict:
         return {"status": "empty", "universe": universe_id,
                 "message": f"股票池 {universe_id} 为空"}
     symbols = list(members)
-    try:
-        res = run_backtest(
-            repo, top_k=12, rebalance="monthly", hold_buffer=1.0,
-            strategy="defensive", weighting="vol_inv", vol_target=0.25,
-            universe=symbols, eligibility=eligibility_panel(repo, symbols),
-            cost_model="a_share", limit_model="board",
-            persist=False, return_weights=True,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"{universe_id} 模拟持仓回测失败: {e}")
-        return {"status": "failed", "universe": universe_id, "message": str(e)}
-    events = _events_from_weights(res.get("weights"), "backtest")
-    last = events[-1]["exec_date"] if events else None
-    events += _events_from_snapshots(repo, universe_id, last)
+    strategy_id = pool_strategy_id(repo, universe_id)
+    if strategy_id == "defensive":
+        try:
+            res = run_backtest(
+                repo, top_k=12, rebalance="monthly", hold_buffer=1.0,
+                strategy="defensive", weighting="vol_inv", vol_target=0.25,
+                universe=symbols, eligibility=eligibility_panel(repo, symbols),
+                cost_model="a_share", limit_model="board",
+                persist=False, return_weights=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"{universe_id} 模拟持仓回测失败: {e}")
+            return {"status": "failed", "universe": universe_id, "message": str(e)}
+        events = _events_from_weights(res.get("weights"), "backtest")
+        last = events[-1]["exec_date"] if events else None
+        events += _events_from_snapshots(repo, universe_id, last)
+    else:
+        # 研究策略：历史与实时调仓事件全部来自回测写入的目标组合快照
+        events = _events_from_snapshots(repo, universe_id, None)
     if not events:
         return {"status": "waiting", "universe": universe_id, "message": "暂无调仓事件"}
 

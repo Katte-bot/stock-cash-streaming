@@ -41,6 +41,7 @@ class ConfigIn(BaseModel):
     config: dict | None = None
     run: bool = True
     force_refresh: bool = False
+    save: bool = False
 
 
 def _with_repo(fn):
@@ -116,7 +117,8 @@ def nl_config(payload: ConfigIn) -> dict:
         weights = config_to_weights(cfg)
         out = {"config": cfg, "weights": weights, "describe": describe_config(cfg)}
         if payload.run:
-            out.update(run_config(repo, cfg, force_refresh=payload.force_refresh))
+            out.update(run_config(repo, cfg, force_refresh=payload.force_refresh,
+                                  save=payload.save, nl_text=payload.text or ""))
         return out
 
     return _guard(lambda: _with_repo(_run))

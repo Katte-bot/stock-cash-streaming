@@ -825,8 +825,22 @@ python -m stock_cash_streaming.cli experiments --universe C0
 **页面**：左侧「策略研究」→ 研究 Hub，顶部 5 个 Tab（策略库 / 策略对比 / 因子实验室 / 因子择时 / 自然语言），全局样本域下拉（A0/C0~C3/自建池）。策略卡片可查看详情（KPI、分年度、净值曲线、评分卡）并实时回测；对比 Tab 输出归一化净值与相关性矩阵；因子实验室展示 IC/ICIR/正向占比与分组收益；自然语言 Tab 支持「规则模式（原 DSL）」与「因子配置模式（白名单因子组 + 权重）」双模式。
 
 **首轮实测（C1，2018-01-02 ~ 2026-11-02）**：value_quality 5.22%/0.33、residual_momentum 11.08%/0.59、conservative_investment 7.18%/0.41、pead 4.08%/0.29、defensive 9.59%/0.54、factor_momentum 7.73%/0.43、nl_factor 9.37%/0.49（年化/夏普）。IC 排名靠前：`asset_turnover_change` −0.1498、`vol_60` −0.1371、`div_yield_3y` +0.1310、`fcf_yield` +0.1163。
+> 注：上述数字在申万行业中性生效、财报回填推进后会变化；同一份数据下结果可复现（缓存带数据版本戳）。
 
-**测试**：新增 `tests/test_research_platform.py`（19 项，覆盖注册表、v4 无未来函数与残差动量剔除近月、v5 报告期派生指标与公告时点对齐、缩尾/Z/行业中性、策略构建、因子动量权重上限、IC 识别能力、NL 配置校验），全量 `pytest` 59 项通过。
+**回测口径补强（2026-11-04 第二轮）**
+- **容量约束**：`capacity_pct` 默认 1%，单票目标金额 ≤ 近 20 日日均成交额 × 比例，超限降权并留现金（`backtest/engine.py::_capacity_cap`）。
+- **Walk-forward**：`research/walkforward.py` 按自然年「训练 3 年 → 测试 1 年」滚动，输出每段测试窗口年化/超额/夏普与通过率，写入 `fact_strategy_run.metrics_json.walkforward`。
+- **交易明细**：回测记录调仓明细（日期/代码/方向/权重变化）与最差 5 个单日个股贡献，详情页展示最近 50 笔。
+- **池策略闭环**：绑定研究策略后，`run_strategy` 会把回测权重写成 `fact_target_run` / `fact_target_portfolio` 快照（命名 `{strategy_id}_{pool}`），并自动刷新模拟跟踪与模拟账户；`/api/portfolio`、`/api/tracking`、`/api/paper` 均按池绑定策略读取。
+- **数据版本戳**：研究因子缓存 key 追加「财务最新公告日 + 财务行数 + 行情最新交易日」哈希，财报/行情回填后自动失效，避免同一策略在不同时间给出不同结果。
+- **事件与状态落库**：`cli market --events` 回填 `fact_earnings_event`（SUE/营收惊喜/公告日异常收益）；`cli market --members` 与池任务每月首个交易日写 `dim_universe_member_history`；`cli strat meta` 同时写 `fact_regime_state`（趋势/波动分位/市场宽度/成交额变化）。
+- **新增接口**：`GET /api/research/factors/corr`（最新截面 Spearman 相关性）、`POST /api/research/meta/run`（重算因子动量权重 + 市场状态）、`POST /api/nl/config` 支持 `save=true` 登记到自然语言策略库（`dim_nl_strategy`）。
+- **页面**：策略详情新增「滚动验证 / 最差单日贡献 / 最近调仓明细」；因子实验室新增「分年度与分市场状态 IC」「因子相关性热力图」；因子择时「重新计算」改为真实的 `/meta/run`。
+- **CLI**：`cli strat backtest|compare|ic|meta`，新增 `--capacity`；`cli market` 新增 `--events`、`--members`。
+
+**验收补充（2026-11-04）**：全 A 行情覆盖 5230/5234（99.9%）；申万行业 5577 只；A0 与 C1~C3 均可运行；C1 绑定 `value_quality` 后 `/api/portfolio` 返回研究组合（5 只、仓位 100%）、`/api/tracking` 使用 `value_quality_C1` 净值、`/api/paper` 正常刷新（验证后已恢复 `defensive` 并重建账户）；`pytest` 66 项通过。
+
+**测试**：`tests/test_research_platform.py` 26 项，覆盖注册表（版本数量/重复注册）、v4 全因子无未来函数与残差动量剔除近月、v5 报告期派生指标与公告时点对齐、缩尾/Z/行业中性、策略构建、因子动量权重上限、IC 识别能力、NL 配置校验、容量约束、walk-forward 分段、池快照写入、成员月度快照幂等、财报事件落库；全量 `pytest` 66 项通过。
 
 **已知限制**
 - 小池（如 C1 8 只）分组收益样本不足（要求每组 ≥5 只、合计 ≥50 只），分组图仅在全 A 池有意义；

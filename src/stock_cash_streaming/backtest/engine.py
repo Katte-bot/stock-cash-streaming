@@ -408,6 +408,21 @@ def defensive_enhanced_score(piv: dict[str, pd.DataFrame], close: pd.DataFrame,
     return score.where(valid)
 
 
+def _capacity_cap(amount: pd.DataFrame, trade_date: str, capacity_pct: float,
+                  capital: float) -> pd.Series | None:
+    """单票容量上限权重：目标金额 ≤ 近 20 日日均成交额 × capacity_pct。
+
+    返回每只股票允许的最大权重（基于当前净值），无数据返回 None。
+    """
+    if trade_date not in amount.index or capital <= 0:
+        return None
+    hist = amount.loc[amount.index <= trade_date].tail(20)
+    if hist.empty:
+        return None
+    amt20 = hist.mean(axis=0, skipna=True)
+    return (amt20 * capacity_pct / capital).replace([np.inf, -np.inf], np.nan)
+
+
 def run_backtest(
     repo: Repository,
     top_k: int = 2,
@@ -439,6 +454,8 @@ def run_backtest(
     dynamic_top_k: bool = False,
     dynamic_vol_target: bool = False,
     universe_tag: str | None = None,
+    capacity_pct: float = 0.0,
+    return_trades: bool = False,
 ) -> dict:
     """运行回测，落库并返回结果。
 
@@ -453,12 +470,16 @@ def run_backtest(
     dynamic_top_k : 市场 20 日波动高于过去 250 日中位数 1.2 倍时，TopK 放大 1.5 倍。
     dynamic_vol_target: 高波动区间把波动目标下调 20%。
     universe_tag : 落库策略名追加池后缀（如 defensive_top12_monthly_C2）。
+    capacity_pct : >0 时按「近 20 日日均成交额 × 比例」限制单票目标金额（默认关闭）。
+    return_trades: 为 True 时额外返回调仓明细、最差单日贡献与调仓日列表。
     """
     if panel is not None:
         close, ret, pct = panel["close"], panel["ret"], panel["pct"]
         piv, sector_map, st_symbols = panel["piv"], panel["sector_map"], panel["st_symbols"]
+        amount = panel.get("amount")
     else:
         close, ret, pct = _load_quotes(repo)
+        amount = None
         if close.empty:
             raise RuntimeError("无行情数据")
 
@@ -495,6 +516,8 @@ def run_backtest(
     if universe:
         keep = [c for c in close.columns if c in set(universe)]
         close, ret, pct = close[keep], ret[keep], pct[keep]
+        if amount is not None:
+            amount = amount.reindex(columns=keep)
         piv = {k: v.reindex(columns=keep) for k, v in piv.items()}
         if eligibility is not None:
             eligibility = eligibility.reindex(index=close.index, columns=close.columns)
@@ -570,6 +593,8 @@ def run_backtest(
     cost_paid = 0.0
     weight_hist: list[pd.Series] = []
     contrib_hist: list[pd.Series] = []
+    trades: list[dict] = []
+    rebalance_dates: list[str] = []
     period = {"daily": 1, "weekly": 5, "monthly": 20, "bimonthly": 40, "quarterly": 60}.get(rebalance, 1)
     vol_20 = piv.get("vol_20")
     proxy_nav, proxy_hist = 1.0, []
@@ -640,6 +665,13 @@ def run_backtest(
                 if raw_sum > 0 and new_sum > 0:
                     target = target * (raw_sum / new_sum)
 
+            # 容量约束：单票目标金额不超过近 20 日日均成交额的比例（留现金，不强制满仓）
+            if capacity_pct > 0 and amount is not None:
+                cap_w = _capacity_cap(amount, d, capacity_pct, nav)
+                if cap_w is not None and not cap_w.empty:
+                    target = target.clip(upper=cap_w.reindex(target.index).fillna(0.0))
+                    target = target.where(target > 1e-6, 0.0)
+
         target_prev = target.copy()
 
         # 3) 涨跌停约束（可切换统一阈值/分板块阈值）
@@ -667,6 +699,22 @@ def run_backtest(
         nav *= (1 - cost)
         cost_paid += nav * cost
         exposures.append(float(w_prev.sum()))
+
+        if return_trades:
+            delta_d = w_new - w_prev
+            if float(delta_d.abs().sum()) > 1e-9:
+                rebalance_dates.append(d)
+                for s in symbols:
+                    dw = float(delta_d.get(s, 0.0))
+                    if abs(dw) <= 1e-6:
+                        continue
+                    px = close.at[d, s] if s in close.columns else np.nan
+                    trades.append({
+                        "trade_date": d, "symbol": s,
+                        "side": "buy" if dw > 0 else "sell",
+                        "weight_delta": round(dw, 6),
+                        "close": None if pd.isna(px) else round(float(px), 4),
+                    })
 
         w_prev = w_new
         dates_out.append(d)
@@ -721,4 +769,16 @@ def run_backtest(
         idx_out = pd.Index(dates_out, name="trade_date")
         result["weights"] = pd.DataFrame(weight_hist, index=idx_out)
         result["contrib"] = pd.DataFrame(contrib_hist, index=idx_out)
+    if return_trades:
+        result["trades"] = trades
+        result["rebalance_dates"] = rebalance_dates
+        worst: list[dict] = []
+        if contrib_hist:
+            cdf = pd.DataFrame(contrib_hist, index=pd.Index(dates_out, name="trade_date"))
+            stack = cdf.stack().dropna()
+            if not stack.empty:
+                for (d, s), v in stack.nsmallest(5).items():
+                    worst.append({"trade_date": str(d), "symbol": s,
+                                  "contribution": round(float(v), 6)})
+        result["worst_days"] = worst
     return result

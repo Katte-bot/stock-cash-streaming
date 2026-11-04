@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -31,6 +32,14 @@ class CompareIn(BaseModel):
     start: str | None = None
     end: str | None = None
     oos_start: str | None = None
+
+
+class MetaIn(BaseModel):
+    universe: str = "A0"
+    components: list[str] | None = None
+    top_k: int = 12
+    start: str | None = None
+    end: str | None = None
 
 
 def _with_repo(fn):
@@ -76,6 +85,10 @@ def strategies(universe: str = "A0") -> dict:
                     "end": latest["end_date"], "full": metrics.get("full", {}),
                     "oos": metrics.get("oos", {}), "scorecard": metrics.get("scorecard", {}),
                     "yearly": metrics.get("yearly", {}),
+                    "regime": metrics.get("regime", {}),
+                    "walkforward": metrics.get("walkforward", {}),
+                    "worst_days": metrics.get("worst_days", []),
+                    "trades": metrics.get("trades", []),
                 },
             })
         return {"universe": universe, "items": items}
@@ -99,11 +112,26 @@ def strategy_detail(strategy_id: str, universe: str = "A0") -> dict:
             nav = [{"trade_date": r["trade_date"], "nav": r["nav"],
                     "benchmark": r["benchmark"], "drawdown": r["drawdown"]}
                    for r in rows[::3]]
+        last_run = None
+        if latest:
+            m = latest.get("metrics") or {}
+            last_run = {
+                "run_id": latest["run_id"], "strategy_id": latest["strategy_id"],
+                "universe_id": latest["universe_id"], "created_at": latest["created_at"],
+                "score": latest["score"], "start": latest["start_date"],
+                "end": latest["end_date"], "oos_start": latest["oos_start"],
+                "full": m.get("full", {}), "oos": m.get("oos", {}),
+                "yearly": m.get("yearly", {}), "regime": m.get("regime", {}),
+                "scorecard": m.get("scorecard", {}),
+                "walkforward": m.get("walkforward", {}),
+                "trades": m.get("trades", []), "worst_days": m.get("worst_days", []),
+                "capacity_pct": m.get("capacity_pct"),
+            }
         return {
             "strategy_id": spec.id, "name": spec.name, "category": spec.category,
             "description": spec.description, "factors": spec.factors,
             "defaults": spec.defaults, "universe": universe,
-            "last_run": latest, "nav": nav,
+            "last_run": last_run, "nav": nav,
         }
 
     return _with_repo(_run)
@@ -202,15 +230,83 @@ def factor_ic(name: str, universe: str = "A0", horizon: int = 5,
         ic_df = compute_ic(panel, {name: factors[name]}, horizon=horizon)
         q = quantile_returns(panel, factors[name], horizon=max(horizon, 20))
         q.index = [str(x) for x in q.index] if len(q) else q.index
+        series = ic_df[name].dropna()
+        by_year: dict[str, dict] = {}
+        if len(series):
+            years = pd.to_datetime(pd.Index(series.index)).year
+            for y, g in series.groupby(years):
+                by_year[str(int(y))] = {"mean_ic": round(float(g.mean()), 4),
+                                        "n": int(len(g))}
+        by_regime = _ic_by_regime(repo, series)
+        # 覆盖率：最近 60 个交易日非空比例
+        cov = factors[name].tail(60)
+        coverage = float(cov.notna().to_numpy().mean()) if cov.size else None
         return {
             "factor": name, "universe": universe, "horizon": horizon,
             "summary": summarize(ic_df).get(name, {}),
+            "coverage": None if coverage is None else round(coverage, 4),
+            "by_year": by_year, "by_regime": by_regime,
             "series": [{"trade_date": d, "ic": round(float(v), 4)}
-                       for d, v in ic_df[name].dropna().items()],
+                       for d, v in series.items()],
             "quantiles": q.reset_index().rename(columns={"index": "trade_date"})
             .to_dict("records") if len(q) else [],
             "cache": cache_info,
         }
+
+    return _with_repo(_run)
+
+
+def _ic_by_regime(repo, series) -> dict[str, dict]:
+    """按沪深300 20 日趋势划分市场状态，统计各状态的平均 IC。"""
+    if series is None or len(series) == 0:
+        return {}
+    from ..ingest.index_quote import index_series
+
+    idx = index_series(repo, "sh000300")
+    if idx.empty:
+        return {}
+    trend = idx.pct_change(20)
+    regime = pd.Series("range", index=idx.index)
+    regime[trend > 0.03] = "up"
+    regime[trend < -0.03] = "down"
+    regime = regime.reindex(series.index).ffill()
+    out: dict[str, dict] = {}
+    for name in ("up", "range", "down"):
+        part = series[regime == name]
+        if len(part) < 10:
+            continue
+        out[name] = {"mean_ic": round(float(part.mean()), 4), "n": int(len(part))}
+    return out
+
+
+@router.get("/factors/corr")
+def factor_corr(universe: str = "A0", names: str = "", date: str | None = None) -> dict:
+    """因子截面相关性（默认最新交易日，Spearman）。"""
+    from ..features.cache import load_cached_factors
+
+    picks = [x.strip() for x in (names or "").split(",") if x.strip()]
+    default = ["vol_120", "downside_vol_120", "ivol_60", "resid_mom_126", "resid_mom_252",
+               "ep_ttm", "bp_mrq", "roe_ttm", "roa_ttm", "asset_growth",
+               "capex_to_assets", "sue"]
+
+    def _run(repo):
+        panel, factors, cache_info = load_cached_factors(repo, universe, None, None)
+        picked = [n for n in (picks or default) if n in factors]
+        if len(picked) < 2:
+            raise HTTPException(status_code=400, detail="可用因子不足 2 个")
+        d = date or panel.close.index[-1]
+        frame = pd.DataFrame({n: factors[n].loc[d] for n in picked if d in factors[n].index})
+        frame = frame.dropna(how="all")
+        if frame.empty:
+            raise HTTPException(status_code=404, detail="该日无因子截面数据")
+        corr = frame.corr(method="spearman").round(3)
+        valid = int((frame.notna().sum(axis=1) >= 2).sum())
+        return {"universe": universe, "trade_date": str(d),
+                "names": list(corr.columns),
+                "matrix": [[None if pd.isna(v) else float(v) for v in row]
+                           for row in corr.to_numpy()],
+                "n_symbols": valid, "n_columns": int(frame.shape[1]),
+                "cache": cache_info}
 
     return _with_repo(_run)
 
@@ -248,7 +344,7 @@ def meta_weights() -> dict:
         latest = repo.query("SELECT MAX(trade_date) AS d FROM fact_strategy_weight")
         d = latest[0]["d"] if latest else None
         if not d:
-            return {"trade_date": None, "items": []}
+            return {"trade_date": None, "items": [], "history": []}
         rows = repo.query(
             "SELECT strategy_id, weight, reason FROM fact_strategy_weight "
             "WHERE trade_date=? ORDER BY weight DESC", (d,))
@@ -257,5 +353,43 @@ def meta_weights() -> dict:
             "ORDER BY trade_date")
         return {"trade_date": d, "items": [dict(r) for r in rows],
                 "history": [dict(r) for r in hist]}
+
+    return _with_repo(_run)
+
+
+@router.post("/meta/run")
+def meta_run(payload: MetaIn) -> dict:
+    """重算因子动量权重并落库（同时刷新市场状态表）。"""
+    from ..features.cache import load_cached_factors
+    from ..research.factor_momentum import compute as compute_meta
+    from ..research.regime import sync_regime_state
+
+    def _run(repo):
+        ensure_registered()
+        spec = get_strategy("factor_momentum")
+        comps = payload.components or list(spec.defaults.get("components") or [])
+        panel, factors, cache_info = load_cached_factors(
+            repo, payload.universe, payload.start, payload.end)
+        if panel.close.empty:
+            raise HTTPException(status_code=400, detail="样本域无行情数据")
+        _, weight_history, _components = compute_meta(
+            repo, panel, factors, comps, top_k=int(payload.top_k))
+        if not weight_history:
+            raise HTTPException(status_code=400, detail="候选策略历史不足，无法计算权重")
+        rows = []
+        for d, weights in weight_history.items():
+            for sid, w in weights.items():
+                rows.append({"trade_date": d, "strategy_id": sid,
+                             "weight": round(float(w), 4), "reason": "factor_momentum"})
+        if rows:
+            repo.upsert("fact_strategy_weight", rows, ["trade_date", "strategy_id"])
+        regime = sync_regime_state(repo)
+        last_date = max(weight_history)
+        return {"universe": payload.universe, "trade_date": last_date,
+                "items": [{"strategy_id": k, "weight": round(float(v), 4)}
+                          for k, v in sorted(weight_history[last_date].items(),
+                                             key=lambda kv: -kv[1])],
+                "history_rows": len(rows), "regime": regime,
+                "cache": cache_info}
 
     return _with_repo(_run)

@@ -192,3 +192,58 @@ def compute_v5(repo: Repository, panel: Panel) -> dict[str, pd.DataFrame]:
             out["attention_20"][sym] = att
 
     return {k: v.astype("float32").replace([np.inf, -np.inf], np.nan) for k, v in out.items()}
+
+
+def sync_earnings_events(repo: Repository, symbols: list[str] | None = None) -> dict:
+    """把财报事件（SUE / 营收惊喜 / 公告日异常收益）落库到 fact_earnings_event。
+
+    供 PEAD 审计与因子复查：一行 = 一个（股票, 报告期），公告日一律取 `pub_date`。
+    """
+    from bisect import bisect_left
+
+    if symbols is None:
+        symbols = [r["symbol"] for r in repo.query(
+            "SELECT DISTINCT symbol FROM fact_financial WHERE metric='total_assets'")]
+    if not symbols:
+        return {"rows": 0, "symbols": 0}
+    rep = _report_frame(repo, symbols)
+    if rep.empty:
+        return {"rows": 0, "symbols": 0}
+
+    market = {r["trade_date"]: r["m"] for r in repo.query(
+        "SELECT trade_date, AVG(pct_chg) AS m FROM fact_quote GROUP BY trade_date")}
+    rows: dict[tuple[str, str], dict] = {}
+    for sym, sub in rep.groupby("symbol"):
+        q = repo.query(
+            "SELECT trade_date, pct_chg FROM fact_quote WHERE symbol=? ORDER BY trade_date",
+            (sym,))
+        if not q:
+            continue
+        dates = [r["trade_date"] for r in q]
+        pct = [r["pct_chg"] for r in q]
+        for r in sub.itertuples():
+            pub = getattr(r, "pub_date", None)
+            stat = getattr(r, "stat_date", None)
+            if not pub or not stat:
+                continue
+            pos = bisect_left(dates, str(pub))
+            if pos >= len(dates):
+                continue
+            d = dates[pos]
+            p = pct[pos]
+            m = market.get(d)
+            ann = None if (p is None or m is None) else round(float(p) - float(m), 4)
+            def _val(name):
+                v = getattr(r, name, None)
+                return None if v is None or pd.isna(v) else round(float(v), 6)
+
+            rows[(sym, str(stat))] = {
+                "symbol": sym, "stat_date": str(stat), "pub_date": str(pub),
+                "sue": _val("sue"), "revenue_surprise": _val("revenue_surprise"),
+                "announce_ret_1d": ann,
+            }
+    items = list(rows.values())
+    if items:
+        repo.upsert("fact_earnings_event", items, ["symbol", "stat_date"])
+    logger.info(f"财报事件落库：{len(items)} 行（{len(symbols)} 只股票）")
+    return {"rows": len(items), "symbols": len(symbols)}

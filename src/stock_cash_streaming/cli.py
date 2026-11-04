@@ -468,6 +468,18 @@ def _cmd_market(args) -> None:
                 workers=max(1, args.workers // 2),
             ))
 
+        if args.events:
+            from .features.fundamental_v5 import sync_earnings_events
+
+            print("回填财报事件（SUE / 营收惊喜 / 公告日收益）…")
+            print(sync_earnings_events(repo))
+
+        if args.members:
+            from .research.universe import snapshot_members
+
+            print("记录池成员月度快照…")
+            print(snapshot_members(repo))
+
         print("\n===== 全 A 数据覆盖度 =====")
         print("行情：", full_market.coverage(repo, args.start))
         print("财务：", statements.coverage(repo))
@@ -492,9 +504,10 @@ def _cmd_strat(args) -> None:
             return
 
         if args.action == "backtest":
+            params = {"capacity_pct": args.capacity} if args.capacity is not None else None
             res = run_strategy(repo, args.strategy, universe=args.universe,
                                start=args.start, end=args.end, oos_start=args.oos_start,
-                               persist=not args.no_persist)
+                               params=params, persist=not args.no_persist)
             m, oos = res["metrics"], res["oos"]
             print(f"\n===== {res['strategy_name']}（{res['universe']}）=====")
             print(f"区间      : {res['start']} ~ {res['end']}")
@@ -502,9 +515,16 @@ def _cmd_strat(args) -> None:
             print(f"最大回撤  : {m.get('max_drawdown', 0):.2%}")
             if oos:
                 print(f"样本外    : 年化 {oos.get('annual_return', 0):.2%}，夏普 {oos.get('sharpe', 0):.2f}")
+            wf = (res.get("walkforward") or {}).get("summary") or {}
+            if wf:
+                print(f"滚动验证  : {wf.get('passed')}/{wf.get('segments')} 段通过"
+                      f"（通过率 {wf.get('pass_rate', 0):.0%}，测试均值 "
+                      f"{wf.get('avg_test_annual', 0):.2%}）")
             print(f"评分      : {res['scorecard']['score']}  {'；'.join(res['scorecard']['reasons']) or '无警示'}")
             if res["positions"]:
                 print("最新持仓  :", " ".join(res["positions"]))
+            if res.get("pool_sync"):
+                print("池同步    :", res["pool_sync"])
             return
 
         if args.action == "compare":
@@ -538,6 +558,9 @@ def _cmd_strat(args) -> None:
             return
 
         if args.action == "meta":
+            from .research.regime import sync_regime_state
+            from .research.universe import snapshot_members
+
             res = run_strategy(repo, "factor_momentum", universe=args.universe,
                                start=args.start, end=args.end, persist=True)
             print(f"\n===== 因子动量（{args.universe}）=====")
@@ -545,6 +568,10 @@ def _cmd_strat(args) -> None:
                 print(f"  {sid:<24} {w:.1%}")
             print(f"年化 {res['metrics'].get('annual_return', 0):.2%}，"
                   f"夏普 {res['metrics'].get('sharpe', 0):.2f}，评分 {res['scorecard']['score']}")
+            st = sync_regime_state(repo)
+            print(f"市场状态落库：{st.get('rows', 0)} 行，最新 {st.get('latest')}")
+            snap = snapshot_members(repo)
+            print(f"成员快照：{snap.get('trade_date')} {snap.get('pools')}")
             return
     finally:
         repo.close()
@@ -1048,6 +1075,8 @@ def main(argv: list[str] | None = None) -> None:
     p_mkt.add_argument("--industry", action="store_true", help="同步申万行业分类")
     p_mkt.add_argument("--index", action="store_true", help="同步指数行情（沪深300/中证500/1000/全指）")
     p_mkt.add_argument("--statements", action="store_true", help="回填现金流量表/资产负债表关键科目")
+    p_mkt.add_argument("--events", action="store_true", help="回填财报事件（SUE/营收惊喜/公告日收益）")
+    p_mkt.add_argument("--members", action="store_true", help="记录池成员月度快照")
     p_mkt.add_argument("--stmt-limit", type=int, default=None, help="本次财报回填的股票数上限")
     p_mkt.add_argument("--limit", type=int, default=None, help="本次行情回填的股票数上限")
     p_mkt.add_argument("--start", default="2018-01-01", help="起始日期")
@@ -1056,17 +1085,22 @@ def main(argv: list[str] | None = None) -> None:
     p_mkt.add_argument("--workers", type=int, default=10, help="行情回填并发线程数（默认 10）")
     p_mkt.set_defaults(func=_cmd_market)
 
-    p_st = sub.add_parser("strat", help="策略研究：列表 / 回测 / 对比 / IC / 因子动量")
-    p_st.add_argument("action", choices=["list", "backtest", "compare", "ic", "meta"])
-    p_st.add_argument("--strategy", default="value_quality", help="策略 ID（backtest 用）")
-    p_st.add_argument("--strategies", default="", help="逗号分隔的策略 ID（compare 用）")
-    p_st.add_argument("--universe", default="A0", help="样本域：A0/C0~C3/自定义池")
-    p_st.add_argument("--start", default=None, help="开始日期")
-    p_st.add_argument("--end", default=None, help="结束日期")
-    p_st.add_argument("--oos-start", default=None, help="样本外起点（默认 2024-01-01）")
-    p_st.add_argument("--horizons", default="1,5,20", help="IC 持有期（逗号分隔）")
-    p_st.add_argument("--no-persist", action="store_true", help="不落库（对比/试跑）")
-    p_st.set_defaults(func=_cmd_strat)
+    def _add_strat_args(p):
+        p.add_argument("action", choices=["list", "backtest", "compare", "ic", "meta"])
+        p.add_argument("--strategy", default="value_quality", help="策略 ID（backtest 用）")
+        p.add_argument("--strategies", default="", help="逗号分隔的策略 ID（compare 用）")
+        p.add_argument("--universe", default="A0", help="样本域：A0/C0~C3/自定义池")
+        p.add_argument("--start", default=None, help="开始日期")
+        p.add_argument("--end", default=None, help="结束日期")
+        p.add_argument("--oos-start", default=None, help="样本外起点（默认 2024-01-01）")
+        p.add_argument("--horizons", default="1,5,20", help="IC 持有期（逗号分隔）")
+        p.add_argument("--capacity", type=float, default=None,
+                       help="容量约束：单票 ≤ 20 日均额 × 比例（默认策略内 1%%）")
+        p.add_argument("--no-persist", action="store_true", help="不落库（对比/试跑）")
+        p.set_defaults(func=_cmd_strat)
+
+    _add_strat_args(sub.add_parser(
+        "strat", help="策略研究：列表 / 回测 / 对比 / IC / 因子动量"))
 
     p_daily = sub.add_parser("daily", help="每日自动流水线（增量→因子→信号→组合→跟踪）")
     p_daily.add_argument("--force", action="store_true", help="非交易日/行情未更新时也强制执行")

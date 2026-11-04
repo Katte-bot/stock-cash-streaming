@@ -167,13 +167,22 @@ nohup .venv/bin/python -m stock_cash_streaming.cli market \
 
 # 5) 查看覆盖度（命令末尾会自动打印）
 .venv/bin/python -m stock_cash_streaming.cli market --index
+
+# 6) 财报事件（SUE/营收惊喜/公告日收益）与池成员月度快照
+.venv/bin/python -m stock_cash_streaming.cli market --events
+.venv/bin/python -m stock_cash_streaming.cli market --members
+
+# 7) 因子动量权重 + 市场状态表（建议每周/每月一次）
+.venv/bin/python -m stock_cash_streaming.cli strat meta --universe C0
 ```
 
 要点：
 
-- 研究因子不写 SQLite 日频，缓存在 `data/research_cache/*.pkl`（TTL 7 天）。怀疑因子口径变化或想强制重算时，直接删该目录即可，回测会自动重建；
+- 研究因子不写 SQLite 日频，缓存在 `data/research_cache/*.pkl`（TTL 7 天）；缓存 key 含「财务最新公告日 + 财务行数 + 行情最新交易日」哈希，**财报/行情回填后会自动失效重算**，无需手工清理；
 - 研究池 `A0`（全 A）不参与每日池任务与模拟持仓，仅用于研究和回测；
-- 研究回测走 `cli strat backtest --strategy value_quality --universe A0 --start 2018-01-01`，结果落 `fact_strategy_run`；因子 IC 走 `cli strat ic --universe A0`，落 `fact_factor_ic`；
+- 研究回测走 `cli strat backtest --strategy value_quality --universe A0 --start 2018-01-01`，结果落 `fact_strategy_run`；`--capacity 0.01` 可单独指定容量约束（默认策略内 1%）；
+- 因子 IC 走 `cli strat ic --universe A0`，落 `fact_factor_ic`；`cli strat meta` 会把权重写 `fact_strategy_weight`、市场状态写 `fact_regime_state`、成员快照写 `dim_universe_member_history`；
+- 研究策略绑定到股票池后（池详情「策略配置条」），池任务会按 `{strategy_id}_{pool}` 写目标组合快照，并自动刷新跟踪净值与模拟账户；
 - 日志：`logs/market_backfill.log`、`logs/statements.log`；两个任务都会写 SQLite，尽量避让 `daily/recover`。
 
 ---

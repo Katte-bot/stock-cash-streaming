@@ -12,9 +12,12 @@ from ..backtest.engine import DEFAULT_COST_RATE, run_backtest
 from ..backtest.metrics import compute_metrics
 from ..common.logging import logger
 from ..features.cache import load_cached_factors
+from ..research.pool_admin import portfolio_target_name
 from ..storage.repository import Repository
 from ..strategy.registry import ensure_registered, get as get_strategy, sync_to_db
 from .scorecard import score_strategy
+from .walkforward import summarize as summarize_walkforward
+from .walkforward import walk_forward
 
 DEFAULT_OOS_START = "2024-01-01"
 
@@ -102,6 +105,7 @@ def run_strategy(repo: Repository, strategy_id: str, universe: str = "A0",
         "close": panel.close, "ret": panel.ret, "pct": panel.pct,
         "piv": factors, "sector_map": panel.sector_map,
         "st_symbols": panel.st_symbols, "eligibility": panel.eligibility,
+        "amount": panel.amount,
     }
     res = run_backtest(
         repo, top_k=int(p["top_k"]), cost_rate=DEFAULT_COST_RATE,
@@ -110,7 +114,8 @@ def run_strategy(repo: Repository, strategy_id: str, universe: str = "A0",
         weighting=p.get("weighting", "equal"), vol_target=float(p.get("vol_target", 0.0)),
         score_override=score, panel=engine_panel, eligibility=panel.eligibility,
         cost_model="a_share", limit_model="board", persist=persist,
-        universe_tag=universe, return_weights=False,
+        universe_tag=universe, return_weights=True, return_trades=True,
+        capacity_pct=float(p.get("capacity_pct", 0.0) or 0.0),
     )
 
     nav, bench = res["nav"], res["benchmark"]
@@ -124,6 +129,8 @@ def run_strategy(repo: Repository, strategy_id: str, universe: str = "A0",
 
     yearly = _yearly(nav)
     regime = _regime_metrics(repo, nav, bench)
+    wf = walk_forward(nav, bench)
+    wf_summary = summarize_walkforward(wf)
     scorecard = score_strategy(res["metrics"], oos)
 
     last_date = nav.index[-1] if len(nav) else None
@@ -132,9 +139,17 @@ def run_strategy(repo: Repository, strategy_id: str, universe: str = "A0",
         row = score.loc[last_date].where(panel.eligibility.loc[last_date]).dropna()
         positions = list(row.sort_values(ascending=False).index[:int(p["top_k"])])
 
+    trades = res.get("trades", [])
+    worst_days = res.get("worst_days", [])
+    recent_trades = trades[-50:][::-1]
+
     metrics_json = {
         "full": res["metrics"], "oos": oos, "yearly": yearly, "regime": regime,
         "cache": cache_info, "scorecard": scorecard,
+        "walkforward": {"segments": wf, "summary": wf_summary},
+        "worst_days": worst_days,
+        "trades": recent_trades,
+        "capacity_pct": float(p.get("capacity_pct", 0.0) or 0.0),
     }
     if weight_history:
         metrics_json["weights"] = weight_history[max(weight_history)]
@@ -165,13 +180,20 @@ def run_strategy(repo: Repository, strategy_id: str, universe: str = "A0",
     logger.info(f"策略回测 {strategy_id}/{universe}: {res['metrics'].get('annual_return', 0):.2%}"
                 f" 夏普 {res['metrics'].get('sharpe', 0):.2f} 评分 {scorecard['score']}")
 
+    pool_sync: dict = {}
+    if persist and universe and universe != "A0" and strategy_id != "defensive":
+        pool_sync = _sync_pool_outputs(repo, universe, strategy_id, res)
+
     dd = (nav / nav.cummax() - 1).fillna(0.0)
     return {
         "run_id": res["run_id"], "strategy_id": strategy_id, "strategy_name": spec.name,
         "universe": universe, "start": res["start"], "end": res["end"],
         "params": p, "metrics": res["metrics"], "oos": oos, "yearly": yearly,
         "regime": regime, "scorecard": scorecard, "cache": cache_info,
+        "walkforward": {"segments": wf, "summary": wf_summary},
         "positions": positions, "weights": metrics_json.get("weights"),
+        "trades": recent_trades, "worst_days": worst_days,
+        "capacity_pct": metrics_json["capacity_pct"], "pool_sync": pool_sync,
         "nav": [
             {"trade_date": d, "nav": round(float(nav[d]), 2),
              "benchmark": round(float(bench[d]), 2),
@@ -179,3 +201,48 @@ def run_strategy(repo: Repository, strategy_id: str, universe: str = "A0",
             for d in nav.index
         ],
     }
+
+
+def _sync_pool_outputs(repo: Repository, pool_id: str, strategy_id: str,
+                       res: dict) -> dict:
+    """把研究策略回测结果写成池的目标组合快照，并刷新跟踪与模拟账户。"""
+    from ..strategy.paper import refresh_paper_account
+    from ..strategy.tracking import simulate_tracking
+
+    name = portfolio_target_name(pool_id, strategy_id)
+    weights = res.get("weights")
+    reb_dates = res.get("rebalance_dates") or []
+    if weights is None or weights.empty or not reb_dates:
+        return {"status": "skipped", "reason": "无调仓快照"}
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    runs: list[dict] = []
+    rows: list[dict] = []
+    for d in reb_dates:
+        if d not in weights.index:
+            continue
+        row = weights.loc[d]
+        picked = {s: float(w) for s, w in row.items() if float(w) > 1e-9}
+        if not picked:
+            continue
+        runs.append({"trade_date": d, "strategy": name, "is_rebalance": 1,
+                     "basket_vol": None, "vol_scale": 1.0,
+                     "exposure": round(sum(picked.values()), 6), "created_at": now})
+        for sym, w in picked.items():
+            rows.append({"trade_date": d, "strategy": name, "symbol": sym,
+                         "weight": round(w, 6), "raw_weight": round(w, 6),
+                         "is_rebalance": 1, "created_at": now})
+    if not runs:
+        return {"status": "skipped", "reason": "调仓快照为空"}
+
+    repo.upsert("fact_target_run", runs, ["trade_date", "strategy"])
+    repo.upsert("fact_target_portfolio", rows, ["trade_date", "strategy", "symbol"])
+
+    tracking = simulate_tracking(repo, strategy=name, persist=True, universe_id=pool_id)
+    try:
+        paper = refresh_paper_account(repo, pool_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"{pool_id} 模拟账户刷新失败：{e}")
+        paper = {"status": "failed", "message": str(e)}
+    return {"target_strategy": name, "snapshots": len(runs),
+            "tracking": tracking.get("status"), "paper": paper.get("status")}

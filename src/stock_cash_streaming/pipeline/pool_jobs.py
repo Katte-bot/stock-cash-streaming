@@ -288,6 +288,7 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
 
         # 5) 回测
         strategy_id = pool.get("strategy_id") or "defensive"
+        pool_sync: dict = {}
         state, run = backtest_state(repo, pool_id, latest_data, pool["members_updated_at"],
                                     strategy_id=strategy_id)
         try:
@@ -309,6 +310,7 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
                 from ..research.runner import run_strategy
 
                 res = run_strategy(repo, strategy_id, universe=pool_id, persist=True)
+                pool_sync = res.get("pool_sync") or {}
                 m = res["metrics"]
                 step("backtest", "ok",
                      f"{strategy_id}：年化 {m['annual_return']:.2%}，夏普 {m['sharpe']:.2f}，"
@@ -317,12 +319,17 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
             step("backtest", "failed", str(e))
             return finish("failed", str(e))
 
-        # 6) 目标组合（C0 由全局流水线负责；研究策略暂不自动生成组合）
+        # 6) 目标组合（C0 由全局流水线负责；研究策略由 runner 依据回测权重写快照）
         portfolio_name = portfolio_strategy_name(pool_id)
         if pool_id == C0:
             step("portfolio", "skipped", "C0 由全局每日流水线维护")
         elif strategy_id != "defensive":
-            step("portfolio", "skipped", f"{strategy_id} 为研究策略，暂不生成目标组合")
+            if pool_sync.get("status") == "skipped":
+                step("portfolio", "skipped", pool_sync.get("reason", "无快照"))
+            else:
+                step("portfolio", "ok",
+                     f"{pool_sync.get('snapshots', 0)} 个调仓快照 → "
+                     f"{pool_sync.get('target_strategy', '')}")
         else:
             try:
                 exist = repo.query(
@@ -342,11 +349,14 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
             except Exception as e:  # noqa: BLE001
                 step("portfolio", "failed", str(e))
 
-        # 7) 模拟跟踪（C0 由全局流水线负责；研究策略暂不跟踪）
+        # 7) 模拟跟踪（C0 由全局流水线负责；研究策略由 runner 已刷新）
         if pool_id == C0:
             step("tracking", "skipped", "C0 由全局每日流水线维护")
         elif strategy_id != "defensive":
-            step("tracking", "skipped", f"{strategy_id} 为研究策略，暂不跟踪")
+            status = pool_sync.get("tracking") or "skipped"
+            paper = pool_sync.get("paper") or "skipped"
+            step("tracking", "ok" if status in ("running", "ok") else "skipped",
+                 f"{status}；模拟账户 {paper}")
         else:
             try:
                 row = repo.query(
@@ -363,7 +373,17 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
             except Exception as e:  # noqa: BLE001
                 step("tracking", "failed", str(e))
 
-        # 8) 开启每日调度
+        # 8) 成员月度快照（每月首个交易日写一次，降低未来幸存者偏差）
+        try:
+            from ..research.universe import snapshot_members
+
+            snap = snapshot_members(repo, [pool_id])
+            step("snapshot", "ok" if snap.get("rows") else "skipped",
+                 f"{snap.get('trade_date')} 记录 {snap.get('rows', 0)} 行")
+        except Exception as e:  # noqa: BLE001
+            step("snapshot", "failed", str(e))
+
+        # 9) 开启每日调度
         if pool_id == C0:
             step("schedule", "skipped", "全局每日流水线")
         elif pool["daily_enabled"]:
@@ -378,8 +398,8 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
         failed = [a for a in actions if a["status"] == "failed"]
         if failed:
             return finish("failed", "；".join(f"{a['step']}: {a['message']}" for a in failed))
-        # pool 步骤只是加载信息，不参与“是否全部跳过”的判断
-        work = [a for a in actions if a["step"] != "pool"]
+        # pool 步骤只是加载信息、snapshot 只是记账，不参与“是否全部跳过”的判断
+        work = [a for a in actions if a["step"] not in ("pool", "snapshot")]
         if work and all(a["status"] == "skipped" for a in work):
             return finish("skipped")
         return finish("ok")

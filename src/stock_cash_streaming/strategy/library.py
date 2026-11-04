@@ -134,6 +134,8 @@ def build_defensive(panel: Panel, factors: dict[str, pd.DataFrame], params: dict
 _DEFAULT_PORTFOLIO = {
     "top_k": 12, "rebalance": "monthly", "weighting": "equal",
     "hold_buffer": 1.0, "vol_target": 0.0,
+    # 容量约束：单票目标金额 ≤ 近 20 日日均成交额 × 1%（全 A 小票保护）
+    "capacity_pct": 0.01,
 }
 
 

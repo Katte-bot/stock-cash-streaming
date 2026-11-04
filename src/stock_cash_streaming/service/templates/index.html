@@ -639,6 +639,26 @@
             <div class="table-wrap"><table><tbody id="sdRegime"></tbody></table></div>
           </div>
         </div>
+        <div class="grid2" style="margin-top:12px">
+          <div>
+            <h2 style="font-size:13px">滚动验证 <span class="tag">3 年训练 / 1 年测试</span></h2>
+            <div class="table-wrap"><table>
+              <thead><tr><th>测试区间</th><th class="num">年化</th><th class="num">超额</th><th class="num">夏普</th></tr></thead>
+              <tbody id="sdWf"></tbody></table></div>
+          </div>
+          <div>
+            <h2 style="font-size:13px">最差单日贡献</h2>
+            <div class="table-wrap"><table>
+              <thead><tr><th>日期</th><th>代码</th><th class="num">贡献</th></tr></thead>
+              <tbody id="sdWorst"></tbody></table></div>
+          </div>
+        </div>
+        <h2 style="font-size:13px;margin-top:12px">最近调仓明细</h2>
+        <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+          <table><thead><tr><th>日期</th><th>代码</th><th>方向</th><th class="num">权重变化</th></tr></thead>
+            <tbody id="sdTrades"></tbody></table>
+        </div>
+        <p class="desc">以上均为历史研究结果，不构成投资建议。</p>
         <div class="reasons" id="sdPositions" style="margin-top:10px"></div>
       </div>
     </div>
@@ -696,6 +716,25 @@
           <h2 style="font-size:13px">10 分组远期收益 <span class="tag">研究展示</span></h2>
           <div class="chart" id="fQChart"></div>
         </div>
+        <div class="card">
+          <h2 style="font-size:13px">分年度 / 分市场状态 IC</h2>
+          <div class="grid2">
+            <div class="table-wrap"><table>
+              <thead><tr><th>年度</th><th class="num">平均 IC</th><th class="num">样本</th></tr></thead>
+              <tbody id="fYear"></tbody></table></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>状态</th><th class="num">平均 IC</th><th class="num">样本</th></tr></thead>
+              <tbody id="fRegime"></tbody></table></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2 style="font-size:13px">因子截面相关性 <span class="tag">最新交易日 Spearman</span></h2>
+          <div class="pfbar">
+            <button class="btn" id="fCorrBtn">计算相关性</button>
+            <span class="reasons" id="fCorrMsg"></span>
+          </div>
+          <div class="chart" id="fCorrChart"></div>
+        </div>
       </div>
     </div>
 
@@ -708,6 +747,7 @@
           <span class="reasons" id="metaMsg"></span>
         </div>
         <div class="chart" id="metaWeightChart"></div>
+        <h2 style="font-size:13px">权重历史 <span class="tag">每 20 个交易日评估</span></h2>
         <div class="chart" id="metaHistChart"></div>
       </div>
     </div>
@@ -1139,6 +1179,27 @@ function renderDetailMetrics(run){
   }).join('') || '<tr><td class="empty">暂无</td></tr>';
   $('sdPositions').textContent = (sc.reasons && sc.reasons.length)
     ? '提示：' + sc.reasons.join('；') : '未触发评分警示。';
+
+  const wf = (run.walkforward && run.walkforward.segments) || [];
+  $('sdWf').innerHTML = wf.map(x =>
+    `<tr><td>${x.test_start} ~ ${x.test_end}</td>
+      <td class="num ${cls(x.test_annual)}">${fmtPct((x.test_annual || 0) * 100)}</td>
+      <td class="num ${cls(x.test_excess)}">${fmtPct((x.test_excess || 0) * 100)}</td>
+      <td class="num">${(x.test_sharpe || 0).toFixed(2)}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="empty">区间不足或未运行</td></tr>';
+
+  const worst = run.worst_days || [];
+  $('sdWorst').innerHTML = worst.map(x =>
+    `<tr><td>${x.trade_date}</td><td>${x.symbol}</td>
+      <td class="num down">${fmtPct((x.contribution || 0) * 100)}</td></tr>`).join('')
+    || '<tr><td colspan="3" class="empty">暂无</td></tr>';
+
+  const trades = run.trades || [];
+  $('sdTrades').innerHTML = trades.map(x =>
+    `<tr><td>${x.trade_date}</td><td>${x.symbol}</td>
+      <td>${x.side === 'buy' ? '买入' : '卖出'}</td>
+      <td class="num ${x.weight_delta >= 0 ? 'up' : 'down'}">${fmtPct((x.weight_delta || 0) * 100)}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="empty">暂无调仓记录</td></tr>';
 }
 
 function renderDetailNav(nav){
@@ -1180,7 +1241,9 @@ async function runStrategyBacktest(sid){
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
     $('sdMsg').textContent = `完成：年化 ${fmtPct((d.metrics.annual_return || 0) * 100)}，评分 ${d.scorecard.score}`;
-    renderDetailMetrics({full:d.metrics, oos:d.oos, yearly:d.yearly, regime:d.regime, scorecard:d.scorecard});
+    renderDetailMetrics({full:d.metrics, oos:d.oos, yearly:d.yearly, regime:d.regime,
+                         scorecard:d.scorecard, walkforward:d.walkforward,
+                         trades:d.trades, worst_days:d.worst_days});
     renderDetailNav(d.nav || []);
     if (d.positions && d.positions.length)
       $('sdPositions').textContent = '最新持仓：' + d.positions.join(' ');
@@ -1307,7 +1370,19 @@ async function runFactor(){
         value:v, itemStyle:{color: v >= 0 ? '#ef4444' : '#10b981', borderRadius:[4,4,0,0]}}))}],
     }, true);
     $('fResult').style.display = 'block';
-    $('fMsg').textContent = `${name} · ${d.horizon} 日 · ${series.length} 个采样点`;
+    $('fMsg').textContent = `${name} · ${d.horizon} 日 · ${series.length} 个采样点`
+      + (d.coverage == null ? '' : ` · 覆盖率 ${fmtPct(d.coverage * 100)}`);
+    const byYear = d.by_year || {};
+    $('fYear').innerHTML = Object.keys(byYear).sort().map(k =>
+      `<tr><td>${k}</td><td class="num ${cls(byYear[k].mean_ic)}">${Number(byYear[k].mean_ic).toFixed(4)}</td>
+        <td class="num">${byYear[k].n}</td></tr>`).join('')
+      || '<tr><td colspan="3" class="empty">暂无</td></tr>';
+    const byRg = d.by_regime || {};
+    const rgName = {up:'上行', range:'震荡', down:'下行'};
+    $('fRegime').innerHTML = Object.keys(byRg).map(k =>
+      `<tr><td>${rgName[k] || k}</td><td class="num ${cls(byRg[k].mean_ic)}">${Number(byRg[k].mean_ic).toFixed(4)}</td>
+        <td class="num">${byRg[k].n}</td></tr>`).join('')
+      || '<tr><td colspan="3" class="empty">暂无</td></tr>';
     setTimeout(() => {
       charts['fIcChart'] && charts['fIcChart'].resize();
       charts['fQChart'] && charts['fQChart'].resize();
@@ -1316,6 +1391,35 @@ async function runFactor(){
     $('fMsg').textContent = '失败：' + e.message;
   }finally{
     $('fRunBtn').disabled = false;
+  }
+}
+
+async function runFactorCorr(){
+  $('fCorrBtn').disabled = true;
+  $('fCorrMsg').textContent = '计算中…';
+  try{
+    const r = await fetch(`/api/research/factors/corr?universe=${encodeURIComponent(_rUniverse())}`,
+                          {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    const names = d.names || [], mtx = d.matrix || [];
+    const data = [];
+    names.forEach((_, i) => names.forEach((__, j) => data.push([j, i, mtx[i][j]])));
+    chart('fCorrChart').setOption({
+      grid:{left:12,right:20,top:10,bottom:70,containLabel:true},
+      xAxis:{type:'category',data:names,...ax(),axisLabel:{...ax().axisLabel,rotate:40,fontSize:9}},
+      yAxis:{type:'category',data:names,...ax(),axisLabel:{...ax().axisLabel,fontSize:9}},
+      tooltip:{formatter:p => `${names[p.value[1]]} × ${names[p.value[0]]}<br/>相关系数 ${p.value[2]}`},
+      visualMap:{min:-1,max:1,calculable:true,orient:'horizontal',left:'center',bottom:0,
+                 inRange:{color:['#10b981','#1e293b','#ef4444']},textStyle:{color:C().axis,fontSize:10}},
+      series:[{type:'heatmap',data,emphasis:{itemStyle:{borderColor:'#fff',borderWidth:1}}}],
+    }, true);
+    $('fCorrMsg').textContent = `${d.trade_date} · ${d.n_symbols} 只股票`;
+    setTimeout(() => charts['fCorrChart'] && charts['fCorrChart'].resize(), 60);
+  }catch(e){
+    $('fCorrMsg').textContent = '失败：' + e.message;
+  }finally{
+    $('fCorrBtn').disabled = false;
   }
 }
 
@@ -1374,14 +1478,14 @@ async function runMeta(){
   $('metaMsg').textContent = '计算中…';
   $('metaRunBtn').disabled = true;
   try{
-    const r = await fetch('/api/research/strategies/factor_momentum/backtest', {
+    const r = await fetch('/api/research/meta/run', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({universe:_rUniverse(), persist:true}),
+      body: JSON.stringify({universe:_rUniverse()}),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-    $('metaMsg').textContent = `完成：年化 ${fmtPct((d.metrics.annual_return || 0) * 100)}`;
     await loadMeta();
+    $('metaMsg').textContent = `完成：${(d.items || []).length} 个候选策略，市场状态 ${(d.regime || {}).rows || 0} 行`;
   }catch(e){
     $('metaMsg').textContent = '失败：' + e.message;
   }finally{
@@ -1400,6 +1504,7 @@ document.querySelectorAll('#researchTabs .rtab').forEach(b => {
 $('sdRunBtn').onclick = () => runStrategyBacktest($('sdRunBtn').dataset.sid || researchState.detail);
 $('cmpRunBtn').onclick = runCompare;
 $('fRunBtn').onclick = runFactor;
+$('fCorrBtn').onclick = runFactorCorr;
 $('metaRunBtn').onclick = runMeta;
 $('nlOpenBtn').onclick = () => { location.hash = '#/nl'; };
 
@@ -1528,13 +1633,15 @@ async function nlRun(){
     try{
       const r = await fetch('/api/nl/config', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({config: cfg, run: true}),
+        body: JSON.stringify({config: cfg, run: true, save: $('nlSave').checked,
+                              text: ($('nlText').value || '').trim() || null}),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
       renderFactorResult(d.result, d.describe, d.weights);
       $('nlRunMsg').textContent =
-        `回测完成：年化 ${fmtPct((d.result.metrics.annual_return || 0) * 100)}，评分 ${d.result.scorecard.score}`;
+        `回测完成：年化 ${fmtPct((d.result.metrics.annual_return || 0) * 100)}，评分 ${d.result.scorecard.score}`
+        + (d.saved ? `；已保存 ${d.saved.strategy_id}` : '');
     }catch(e){
       $('nlRunMsg').textContent = '回测失败：' + e.message;
     }finally{

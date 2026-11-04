@@ -226,8 +226,9 @@ def parse_nl_config(text: str) -> dict:
         raise StrategyParseError(f"LLM 返回的配置不可用：{e}") from e
 
 
-def run_config(repo: Repository, config: dict, force_refresh: bool = False) -> dict:
-    """按因子配置运行确定性回测。"""
+def run_config(repo: Repository, config: dict, force_refresh: bool = False,
+               save: bool = False, nl_text: str = "") -> dict:
+    """按因子配置运行确定性回测；save=True 时登记到自然语言策略库（research 状态）。"""
     cfg = validate_config(config)
     weights = config_to_weights(cfg)
     params = {
@@ -243,5 +244,28 @@ def run_config(repo: Repository, config: dict, force_refresh: bool = False) -> d
         oos_start=cfg["backtest"].get("oos_start"), params=params,
         persist=True, force_refresh=force_refresh,
     )
+    out = {"config": cfg, "weights": weights, "describe": describe_config(cfg), "result": res}
+    if save:
+        from .nl_rules import _new_id, _now
+
+        sid = _new_id(repo)
+        now = _now()
+        summary = {
+            "run_id": res["run_id"], "start": res["start"], "end": res["end"],
+            "annual_return": res["metrics"].get("annual_return"),
+            "sharpe": res["metrics"].get("sharpe"),
+            "max_drawdown": res["metrics"].get("max_drawdown"),
+            "oos_annual": (res.get("oos") or {}).get("annual_return"),
+            "score": (res.get("scorecard") or {}).get("score"),
+            "factor_weights": weights,
+        }
+        repo.upsert("dim_nl_strategy", [{
+            "strategy_id": sid, "name": cfg["strategy_name"][:40],
+            "nl_text": nl_text or "", "universe_id": cfg["universe"]["id"],
+            "spec_json": json.dumps({"mode": "factor", "config": cfg}, ensure_ascii=False),
+            "last_result": json.dumps(summary, ensure_ascii=False, default=str),
+            "last_run_at": now, "created_at": now, "updated_at": now,
+        }], ["strategy_id"])
+        out["saved"] = {"strategy_id": sid, "name": cfg["strategy_name"]}
     logger.info(f"自然语言因子策略：{cfg['strategy_name']} · {len(weights)} 个因子")
-    return {"config": cfg, "weights": weights, "describe": describe_config(cfg), "result": res}
+    return out

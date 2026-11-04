@@ -31,9 +31,23 @@ def _cache_dir() -> Path:
 
 
 def _key(version: str, universe: str | None, start: str | None, end: str | None,
-         symbols: list[str]) -> str:
+         symbols: list[str], stamp: str = "") -> str:
     h = hashlib.md5(",".join(sorted(symbols)).encode()).hexdigest()[:10]
-    return f"{version}_{universe or 'ALL'}_{start or 'na'}_{end or 'na'}_{h}"
+    extra = f"_{stamp}" if stamp else ""
+    return f"{version}_{universe or 'ALL'}_{start or 'na'}_{end or 'na'}_{h}{extra}"
+
+
+def _data_stamp(repo: Repository) -> str:
+    """数据版本戳：财务最新公告日 + 行数 + 行情最新交易日。
+
+    财务/行情回填会改变因子值，必须让旧缓存自动失效，否则同一策略在不同时间
+    会给出不同（且不可复现）的结果。
+    """
+    fin = repo.query(
+        "SELECT IFNULL(MAX(pub_date),'') AS d, COUNT(*) AS n FROM fact_financial")[0]
+    q = repo.query("SELECT IFNULL(MAX(trade_date),'') AS d FROM fact_quote")[0]
+    raw = f"{fin['d']}|{fin['n']}|{q['d']}"
+    return hashlib.md5(raw.encode()).hexdigest()[:8]
 
 
 def _is_fresh(path: Path, ttl_days: int = CACHE_TTL_DAYS) -> bool:
@@ -41,6 +55,24 @@ def _is_fresh(path: Path, ttl_days: int = CACHE_TTL_DAYS) -> bool:
         return False
     age = (time.time() - path.stat().st_mtime) / 86400
     return age <= ttl_days
+
+
+def _cleanup(base: str, keep: Path, ttl_days: int = 90) -> None:
+    """删除同前缀的旧数据版本缓存与超过 ttl 的历史缓存，避免 3GB 级文件堆积。"""
+    root = keep.parent
+    for p in root.glob(f"{base}*.pkl"):
+        if p != keep:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    cutoff = time.time() - ttl_days * 86400
+    for p in root.glob("*.pkl"):
+        try:
+            if p != keep and p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            pass
 
 
 def load_stored_factors(repo: Repository, names: list[str], versions: list[str],
@@ -108,7 +140,8 @@ def load_cached_factors(repo: Repository, universe: str | None,
     panel = load_panel(repo, universe=universe, start=start, end=end)
     if panel.close.empty:
         return panel, {}, {"cache": "empty"}
-    key = _key(version, universe, start, end, list(panel.close.columns))
+    base = _key(version, universe, start, end, list(panel.close.columns))
+    key = f"{base}_{_data_stamp(repo)}"
     path = _cache_dir() / f"{key}.pkl"
     if not force and _is_fresh(path):
         try:
@@ -126,6 +159,8 @@ def load_cached_factors(repo: Repository, universe: str | None,
             pickle.dump({"factors": factors,
                          "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}, f,
                         protocol=pickle.HIGHEST_PROTOCOL)
+        _cleanup(base, path)
+        logger.info(f"因子缓存已写入 {path.name}（{path.stat().st_size / 1e6:.0f} MB）")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"因子缓存写入失败：{e}")
     return panel, factors, {"cache": "miss", "file": path.name}

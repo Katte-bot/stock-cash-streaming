@@ -197,6 +197,51 @@ def universe_symbols(repo: Repository, universe_id: str = C0) -> list[str]:
     return list(universe_members(repo, universe_id).keys())
 
 
+def snapshot_members(repo: Repository, universe_ids: list[str] | None = None) -> dict:
+    """每月首个交易日记录一次池成员快照（幂等，用于未来降低幸存者偏差）。
+
+    A0 记录当前全部在市标的；内置/自定义池记录当前成员。
+    """
+    latest_rows = repo.query("SELECT MAX(trade_date) AS d FROM fact_quote")
+    latest = latest_rows[0]["d"] if latest_rows else None
+    if not latest:
+        return {"status": "empty", "rows": 0}
+    month_days = [r["trade_date"] for r in repo.query(
+        "SELECT DISTINCT trade_date FROM fact_quote WHERE trade_date LIKE ? "
+        "ORDER BY trade_date", (f"{latest[:7]}%",))]
+    if not month_days:
+        return {"status": "empty", "rows": 0}
+    snap_date = month_days[0]
+
+    if universe_ids is None:
+        universe_ids = [r["universe_id"] for r in repo.query(
+            "SELECT universe_id FROM dim_universe ORDER BY universe_id")]
+    rows: list[dict] = []
+    written: dict[str, int] = {}
+    for uid in universe_ids:
+        exist = repo.query(
+            "SELECT 1 FROM dim_universe_member_history WHERE universe_id=? AND trade_date=?",
+            (uid, snap_date))
+        if exist:
+            continue
+        if uid == "A0":
+            members = {r["symbol"]: None for r in repo.query(
+                "SELECT symbol FROM dim_stock WHERE out_date IS NULL OR out_date=''")}
+        else:
+            members = universe_members(repo, uid)
+        for sym, sec in members.items():
+            rows.append({"universe_id": uid, "trade_date": snap_date, "symbol": sym,
+                         "sector_code": sec})
+        written[uid] = len(members)
+    if rows:
+        repo.upsert("dim_universe_member_history", rows,
+                    ["universe_id", "trade_date", "symbol"])
+    if written:
+        logger.info(f"成员快照 {snap_date}：{written}")
+    return {"status": "ok", "trade_date": snap_date,
+            "rows": len(rows), "pools": written}
+
+
 def prune_universe(repo: Repository, universe_id: str, max_stale_days: int = 365) -> list[dict]:
     """剔除无行情或长期无行情的成员（退市/长期停牌），并标记 dim_stock。
 
