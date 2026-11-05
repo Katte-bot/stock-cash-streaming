@@ -494,6 +494,51 @@ def _cmd_market(args) -> None:
         repo.close()
 
 
+def _cmd_backup(args) -> None:
+    """数据库在线备份 + 体积报告（建议每周一次，保留最近 N 份）。"""
+    import sqlite3
+    from pathlib import Path
+
+    from .config.settings import get_settings
+
+    repo = open_repository()
+    try:
+        src = Path(get_settings().db_path).resolve()
+        out_dir = Path(args.dir).resolve() if args.dir else src.parent / "backups"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        target = out_dir / f"{src.stem}_{datetime.now():%Y%m%d}{src.suffix}"
+        if target.exists() and not args.force:
+            print(f"今日备份已存在：{target}（加 --force 覆盖）")
+        else:
+            dst = sqlite3.connect(target)
+            try:
+                with dst:
+                    repo.conn.backup(dst)
+            finally:
+                dst.close()
+            print(f"备份完成：{target}（{target.stat().st_size / 1e9:.2f} GB）")
+
+        keep = max(1, args.keep)
+        files = sorted(out_dir.glob(f"{src.stem}_*{src.suffix}"))
+        for old in files[:-keep]:
+            try:
+                old.unlink()
+                print(f"清理旧备份：{old.name}")
+            except OSError:
+                pass
+
+        print("\n===== 库体积 =====")
+        print(f"主库：{src.name} {src.stat().st_size / 1e9:.2f} GB")
+        wal = src.with_name(src.name + "-wal")
+        if wal.exists():
+            print(f"WAL ：{wal.stat().st_size / 1e6:.0f} MB")
+        for tbl in ("fact_quote", "fact_factor", "fact_financial", "fact_earnings_event",
+                    "fact_strategy_run", "fact_target_portfolio"):
+            print(f"{tbl:<24} {repo.count(tbl):>12,} 行")
+    finally:
+        repo.close()
+
+
 def _cmd_strat(args) -> None:
     """策略研究：列表 / 回测 / 对比 / IC / 因子动量。"""
     from .research import ic as ic_mod
@@ -1125,6 +1170,12 @@ def main(argv: list[str] | None = None) -> None:
     p_rec.add_argument("--dry-run", action="store_true",
                        help="只报告缺失调仓日，不写库")
     p_rec.set_defaults(func=_cmd_recover)
+
+    p_bak = sub.add_parser("backup", help="数据库在线备份 + 体积报告（建议每周一次）")
+    p_bak.add_argument("--dir", default=None, help="备份目录（默认 data/backups）")
+    p_bak.add_argument("--keep", type=int, default=2, help="保留最近几份（默认 2）")
+    p_bak.add_argument("--force", action="store_true", help="当天已有备份也覆盖")
+    p_bak.set_defaults(func=_cmd_backup)
 
     p_uni = sub.add_parser("universe", help="股票池：查看 C0/C1、刷新 C1、补拉数据")
     p_uni.add_argument("--id", default="C0", help="股票池 ID（C0/C1/C2...）")

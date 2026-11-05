@@ -852,6 +852,7 @@ python -m stock_cash_streaming.cli experiments --universe C0
 - **价格质量**：`features/panel.py` 与 `backtest/engine.py` 都会剔除「单日 |收益| > 50%」的标的（A 股涨跌幅上限 20%，超限说明复权基准混用），当前剔除 31 只（如 `000006` 收盘价在 5.5 与 410 间反复跳变）；不剔除会让 A0 回测年化飙到 4649%。
 - **池级同步收紧**：`research/runner.py` 只有「该池已绑定此策略」时才写 `fact_target_*` 并刷新模拟账户，研究试跑不再覆盖生产池的持仓。
 - **v3 默认标的**：`compute_fundamental_factors()` 未显式传 `symbols` 时只算生产池（`daily_enabled=1` 的自建池 + 板块成分，约 219 只），避免利润表补齐后全 A 日频因子写入把库撑爆。
+- **库运维**：新增 `cli backup`（SQLite 在线备份 + 保留最近 N 份 + 打印主库/WAL 体积与关键表行数），按周执行；当前库 13.1 GB（`fact_factor` 9,384 万行、`fact_financial` 300 万行、`fact_quote` 930 万行）。
 - **覆盖度**：`cli market` 末尾打印 `income_coverage / ocf_covered`；实测 `income_coverage = 99.85%（5226/5234）`、`ocf_covered = 5226`、`fact_earnings_event` 322,864 行 / 5231 只。因子层面（A0 缓存最近 60 个交易日非空率）：`asset_growth` 99.5%、`ep_ttm` 99.6%、`sue` 98.7%（修复前分别为 2.7% / 0% / 0%）。
 
 **全 A 与各池实测（2018-01-02 ~ 2026-11-04，年化 / 夏普 / 最大回撤 / 样本外年化 / 评分）**

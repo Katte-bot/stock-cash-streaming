@@ -262,21 +262,16 @@ nohup .venv/bin/python -m stock_cash_streaming.cli scheduler --time 16:10 \
 
 数据库是唯一需要备份的资产（代码与配置可从仓库恢复）。
 
-**备份**（建议每日收盘后，保留 14 天）：
+**备份**（建议每周一次，保留最近 2 份；库已 13 GB 级别，不宜每日全量）：
 
 ```bash
 cd /data02/stock-cash-streaming
-.venv/bin/python - <<'PY'
-import sqlite3, datetime, pathlib
-src = sqlite3.connect('data/stock_cash_streaming.sqlite3')
-dst_path = pathlib.Path('data/backups') / f"stock-{datetime.date.today():%Y%m%d}.sqlite3"
-dst_path.parent.mkdir(exist_ok=True)
-dst = sqlite3.connect(dst_path)
-src.backup(dst)          # 在线一致性备份，无需停服务
-dst.close(); src.close()
-print("backup ->", dst_path)
-PY
+.venv/bin/python -m stock_cash_streaming.cli backup            # 在线备份 + 保留 2 份 + 打印体积/行数
+# crontab 示例（每周日 03:00）
+# 0 3 * * 0 cd /data02/stock-cash-streaming && .venv/bin/python -m stock_cash_streaming.cli backup >> logs/backup.log 2>&1
 ```
+
+需要自定义目录或保留份数时用 `--dir` / `--keep`；当天重复执行会跳过（`--force` 覆盖）。
 
 **恢复**：
 
