@@ -104,6 +104,8 @@ def validate_config(raw: dict) -> dict:
     if not isinstance(raw, dict):
         raise SpecError("配置必须是 JSON 对象")
     universe = raw.get("universe") or {}
+    if not isinstance(universe, dict):
+        raise SpecError('universe 必须是对象，如 {"id": "C1"}')
     uid = str(universe.get("id") or "A0").strip().upper()
     if uid not in ALLOWED_UNIVERSE and not re.fullmatch(r"U\d+", uid):
         raise SpecError(f"universe.id 不支持：{uid}")
@@ -113,7 +115,9 @@ def validate_config(raw: dict) -> dict:
     factors = []
     total = 0.0
     for item in factors_in:
-        name = str((item or {}).get("name") or "").strip()
+        if not isinstance(item, dict):
+            raise SpecError("factors 的每一项都必须是对象")
+        name = str(item.get("name") or "").strip()
         if name not in GROUP_FACTORS:
             raise SpecError(f"不支持的因子组：{name or '(空)'}")
         w = _num(item.get("weight"), f"{name}.weight", 0.0, 1.0)
