@@ -53,9 +53,27 @@ def _a_share_rates(trade_date: str, cost_rate: float) -> tuple[float, float]:
 
 
 
-def _load_quotes(repo: Repository) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    rows = repo.query("SELECT symbol, trade_date, close, pct_chg FROM fact_quote ORDER BY symbol, trade_date")
-    df = pd.DataFrame([dict(r) for r in rows])
+def _load_quotes(repo: Repository,
+                 symbols: list[str] | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """加载行情宽表。
+
+    `symbols` 非空时在 SQL 层过滤：全市场行情约 930 万行，按池回测时若先全量加载
+    再裁列会瞬间吃掉 30 GB 以上内存（已出现 OOM 杀掉进程）。
+    """
+    sql = "SELECT symbol, trade_date, close, pct_chg FROM fact_quote"
+    if symbols:
+        syms = list(dict.fromkeys(symbols))
+        frames = []
+        for i in range(0, len(syms), 900):
+            part = syms[i:i + 900]
+            ph = ",".join("?" for _ in part)
+            frames.append(pd.read_sql(f"{sql} WHERE symbol IN ({ph})", repo.conn, params=part))
+        df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    else:
+        df = pd.read_sql(f"{sql} ORDER BY symbol, trade_date", repo.conn)
+    if df.empty:
+        empty = pd.DataFrame()
+        return empty, empty, empty
     close = df.pivot(index="trade_date", columns="symbol", values="close").sort_index()
     pct = df.pivot(index="trade_date", columns="symbol", values="pct_chg").sort_index()
     ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
@@ -69,14 +87,23 @@ def _load_quotes(repo: Repository) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataF
     return close, ret, pct
 
 
-def _pivot_factors(repo: Repository, names: list[str], version: str = "v1") -> dict[str, pd.DataFrame]:
+def _pivot_factors(repo: Repository, names: list[str], version: str = "v1",
+                   symbols: list[str] | None = None) -> dict[str, pd.DataFrame]:
     placeholders = ",".join("?" for _ in names)
-    rows = repo.query(
-        f"SELECT trade_date, symbol, factor, value FROM fact_factor "
-        f"WHERE version=? AND factor IN ({placeholders})",
-        tuple([version] + names),
-    )
-    df = pd.DataFrame([dict(r) for r in rows])
+    sql = (f"SELECT trade_date, symbol, factor, value FROM fact_factor "
+           f"WHERE version=? AND factor IN ({placeholders})")
+    base_params: list = [version] + list(names)
+    frames = []
+    if symbols:
+        syms = list(dict.fromkeys(symbols))
+        for i in range(0, len(syms), 900):
+            part = syms[i:i + 900]
+            ph = ",".join("?" for _ in part)
+            frames.append(pd.read_sql(f"{sql} AND symbol IN ({ph})", repo.conn,
+                                      params=base_params + part))
+        df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    else:
+        df = pd.read_sql(sql, repo.conn, params=base_params)
     if df.empty:
         return {}
     out = {}
@@ -97,13 +124,13 @@ def prepare_panel(repo: Repository, factor_names: list[str], version: str = "v1"
     universe   : 限定股票池成员（None 表示 fact_quote 全部标的）
     eligibility: dates × symbols 的 bool 掩码，False 表示当日不可选（ST/停牌/退市）
     """
-    close, ret, pct = _load_quotes(repo)
+    close, ret, pct = _load_quotes(repo, universe)
     if universe:
         keep = [c for c in close.columns if c in set(universe)]
         close, ret, pct = close[keep], ret[keep], pct[keep]
-    piv = _pivot_factors(repo, factor_names, version)
+    piv = _pivot_factors(repo, factor_names, version, universe)
     if include_fundamentals:
-        piv.update(_pivot_factors(repo, FUNDAMENTAL_FACTOR_NAMES, FUNDAMENTAL_VERSION))
+        piv.update(_pivot_factors(repo, FUNDAMENTAL_FACTOR_NAMES, FUNDAMENTAL_VERSION, universe))
     if universe and piv:
         piv = {k: v.reindex(columns=[c for c in v.columns if c in set(universe)]) for k, v in piv.items()}
     sector_map: dict[str, str] = {}
@@ -485,7 +512,7 @@ def run_backtest(
         piv, sector_map, st_symbols = panel["piv"], panel["sector_map"], panel["st_symbols"]
         amount = panel.get("amount")
     else:
-        close, ret, pct = _load_quotes(repo)
+        close, ret, pct = _load_quotes(repo, universe)
         amount = None
         if close.empty:
             raise RuntimeError("无行情数据")
@@ -507,9 +534,10 @@ def run_backtest(
         else:
             factor_names = ["ret_5", "boll_pos", "macd_hist", "rsi14",
                             "main_net_ratio_5d", "inflow_days_5", "institution_trend"]
-        piv = _pivot_factors(repo, factor_names, version)
+        piv = _pivot_factors(repo, factor_names, version, universe)
         if strategy in ("defensive_enhanced", "defensive_valuation"):
-            piv.update(_pivot_factors(repo, FUNDAMENTAL_FACTOR_NAMES, FUNDAMENTAL_VERSION))
+            piv.update(_pivot_factors(repo, FUNDAMENTAL_FACTOR_NAMES, FUNDAMENTAL_VERSION,
+                                      universe))
 
         sector_map = {}
         for r in repo.query("SELECT symbol, sector_code FROM dim_sector_member"):
@@ -531,7 +559,7 @@ def run_backtest(
     if close.empty:
         raise RuntimeError("无行情数据")
     if score_override is not None and "vol_20" not in piv:
-        vol_piv = _pivot_factors(repo, ["vol_20"], version)
+        vol_piv = _pivot_factors(repo, ["vol_20"], version, universe)
         piv = {**piv, **vol_piv}
 
     if strategy == "flow_rules":

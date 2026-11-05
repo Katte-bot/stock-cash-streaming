@@ -873,8 +873,18 @@ python -m stock_cash_streaming.cli experiments --universe C0
 - 池级闭环复验：C1 绑定 `value_quality` 后跑回测输出「池同步 3 个快照 / tracking running / paper ok」，随后恢复 `defensive` 并 `POST /api/paper/reset` 重建（总资产 231,175.98）；
 - 因子接口复验：`/api/research/factors/asset_growth/ic` 返回 `coverage 0.9948`、9 个年度分组与 up/range/down 三态；`/api/research/factors/corr` 返回 12 因子相关矩阵；自然语言「因子配置模式」跑通（C1：7.56%/0.42，样本外 9.22%）。
 
+**OOM 事故与修复（2026-11-05）**
 
-**测试**：`tests/test_research_platform.py` 27 项，覆盖注册表（版本数量/重复注册）、v4 全因子无未来函数与残差动量剔除近月、v5 报告期派生指标与公告时点对齐、报告期合并与股本/现金流派生（`test_report_panel_derives_income_metrics`）、缩尾/Z/行业中性、策略构建、因子动量权重上限、IC 识别能力、NL 配置校验、容量约束、walk-forward 分段、池快照写入、成员月度快照幂等、财报事件落库；全量 `pytest` 67 项通过。
+现象：`cli daily --force` 与池任务进程多次「无 traceback 直接消失」，日志停在 `回测剔除价格异常标的 26 只`；`journalctl -k` 可见 `Out of memory: Killed process ... anon-rss:38.6 GB`。
+
+原因：`backtest/engine.py::_load_quotes` / `_pivot_factors` 先 `SELECT` 全表（行情 930 万行、因子 1.37 亿行）再用 `pd.DataFrame([dict(r) for r in rows])` 构造，最后才按 `universe` 裁列。按 C1（8 只）回测也要把全市场数据读进内存，加上 pivot 副本直接冲到 38 GB。
+
+修复：两个加载函数新增 `symbols` 参数，在 SQL 层 `WHERE symbol IN (...)`（900/批），并改用 `pd.read_sql` 直接构造；`run_backtest` / `prepare_panel` 把 `universe` 透传下去。效果：C1 回测 3.3 s / 峰值 0.13 GB；C1~C3 池任务各 17–19 s / 峰值 1.57 GB；`pytest` 68 项通过。
+
+> 运维提示：定位「进程消失」先看 `journalctl -k | grep -i "out of memory"`；`pgrep -f "cli daily"` 会匹配到自己执行的命令行，容易误判为仍在运行，改用 `ps -eo pid,args | grep "^ *[0-9]* .*cli daily"` 或看日志末行。
+
+
+**测试**：`tests/test_research_platform.py` 28 项，覆盖注册表（版本数量/重复注册）、v4 全因子无未来函数与残差动量剔除近月、v5 报告期派生指标与公告时点对齐、报告期合并与股本/现金流派生（`test_report_panel_derives_income_metrics`）、行情按池加载与价格断点剔除（`test_load_quotes_filters_symbols_and_bad_prices`）、缩尾/Z/行业中性、策略构建、因子动量权重上限、IC 识别能力、NL 配置校验、容量约束、walk-forward 分段、池快照写入、成员月度快照幂等、财报事件落库；全量 `pytest` 68 项通过。
 
 **已知限制**
 - 小池（如 C1 8 只）分组收益样本不足（要求每组 ≥5 只、合计 ≥50 只），分组图仅在全 A 池有意义；

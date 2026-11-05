@@ -234,6 +234,8 @@ curl -s http://localhost:8000/api/tracking | head -c 400
 | 目标组合日期不是最新交易日 | 最新日滚动因子为空（历史 `pct_chg` 有缺口） | 跑 `cli recover --lookback 30` 补齐后重算 |
 | 自然语言策略「解析失败」 | 未配置 LLM（`OPENAI_API_KEY`），或模型返回了白名单外的指标 | 展开「手动编辑 JSON」直接回测；或在服务器上用 `cli nl --spec-file spec.json --universe C0` |
 | 策略回测提示「股票池为空 / 无行情数据」 | 池成员未拉取行情，或区间不足 30 个交易日 | 先在池详情点「启动/更新」，再重跑；缩短条件或放宽区间 |
+| 进程「无报错直接消失」 | 被内核 OOM 杀掉（典型：全 A 级别的回测/因子一次性加载） | `journalctl -k --since "-2h" \| grep -i "out of memory"` 确认；用 `--universe` 限定池（回测加载已按池在 SQL 层过滤），或拆分任务分批跑 |
+| `pgrep -f "cli daily"` 显示在跑但日志已停 | `pgrep -f` 会匹配到自己那条含关键字的命令 | 用 `ps -eo pid,etime,args \| grep "cli daily"` 或看日志末行/`task_log` 判断 |
 
 ---
 

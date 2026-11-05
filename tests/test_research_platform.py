@@ -162,6 +162,32 @@ def test_report_panel_derives_income_metrics(repo):
     assert last["accruals"] < 0
 
 
+def test_load_quotes_filters_symbols_and_bad_prices(repo):
+    """按池加载行情必须在 SQL 层过滤；单日 > 50% 的价格断点标的应被剔除。"""
+    from stock_cash_streaming.backtest.engine import _load_quotes
+
+    dates = pd.bdate_range("2024-01-02", periods=5).strftime("%Y-%m-%d")
+    rows = []
+    for sym, jump in (("600001", False), ("600002", True)):
+        px = 10.0
+        for i, d in enumerate(dates):
+            if jump and i == 2:
+                px = px * 100          # 复权基准混用的断点
+            rows.append({"symbol": sym, "trade_date": d, "open": px, "high": px,
+                         "low": px, "close": px, "volume": 1e6, "amount": 1e7,
+                         "pct_chg": 0.0, "turnover": 1.0, "adj_factor": None,
+                         "src": "test", "fetched_at": "2026-01-01 00:00:00"})
+    repo.upsert("fact_quote", rows, ["symbol", "trade_date"])
+
+    close, ret, pct = _load_quotes(repo, ["600001"])
+    assert list(close.columns) == ["600001"]
+    assert len(close.index) == 5
+
+    close_all, _, _ = _load_quotes(repo)
+    assert "600002" not in close_all.columns      # 价格断点标的被剔除
+    assert "600001" in close_all.columns
+
+
 def test_v5_align_uses_publication_date():
     dates = pd.Index(["2024-04-25", "2024-04-30", "2024-05-06", "2024-05-10"])
     rep = pd.DataFrame({
