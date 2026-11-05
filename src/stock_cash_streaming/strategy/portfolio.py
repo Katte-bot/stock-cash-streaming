@@ -185,6 +185,11 @@ def build_target_portfolio(
         if h in rank.index:
             rank[h] -= 1
     top = list(rank.nsmallest(min(top_k, len(rank))).index)
+    if not top:
+        # 行情/因子截面不完整时评分可能整列为空，避免除零中断流水线
+        return {"error": f"{trade_date} 无可用评分标的（行情或因子不完整）",
+                "trade_date": trade_date, "strategy": strategy_name,
+                "action": "hold", "exposure": 0.0, "positions": []}
 
     # 1/vol 加权（vol_20 入库单位为百分数，这里换算为小数）
     vol = piv.get("vol_20")

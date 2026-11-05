@@ -178,17 +178,24 @@ nohup .venv/bin/python -m stock_cash_streaming.cli market \
 
 # 7) 因子动量权重 + 市场状态表（建议每周/每月一次）
 .venv/bin/python -m stock_cash_streaming.cli strat meta --universe C0
+
+# 8) 研究因子缓存（按因子落盘，可中断续跑；含内存护栏）
+.venv/bin/python -m stock_cash_streaming.cli research-cache --universe C0,C1,C2,C3
+.venv/bin/python -m stock_cash_streaming.cli research-cache --universe A0
 ```
 
 要点：
 
-- 研究因子不写 SQLite 日频，缓存在 `data/research_cache/*.pkl`（TTL 7 天）；缓存 key 含「财务最新公告日 + 财务行数 + 行情最新交易日」哈希，**财报/行情回填后会自动失效重算**，无需手工清理；
+- 研究因子不写 SQLite 日频，缓存在 `data/research_cache/<key>_<数据版本戳>/`：`panel.pkl` + `factors/<因子名>.pkl` + `manifest.json`；缓存 key 含「财务最新公告日 + 财务行数 + 行情最新交易日」哈希，**财报/行情回填后会自动失效重建**；
+- **重建请在 CLI 里做，不要在页面触发**：`cli research-cache` 逐因子落盘、可中断续跑，并带内存护栏（可用内存低于 `SCS_MIN_AVAIL_GB`，默认 6 GB 时主动中止并保留已落盘结果）。Web 端只读缓存，缓存缺失时研究页返回 503 并提示执行该命令；
+- 每日数据更新后旧缓存会被标记为过期，Web 端会**降级读取上一版缓存**（响应里 `cache=stale`），不会阻塞页面；
+- 夜间批量：`nohup bash scripts/overnight_research.sh > logs/overnight_research.nohup 2>&1 &`（小池缓存 → A0 缓存 → 首批 5 个策略重跑；外部看门狗在可用内存低于 3 GB 时终止子进程）；
 - 研究池 `A0`（全 A）不参与每日池任务与模拟持仓，仅用于研究和回测；
 - 研究回测走 `cli strat backtest --strategy value_quality --universe A0 --start 2018-01-01`，结果落 `fact_strategy_run`；`--capacity 0.01` 可单独指定容量约束（默认策略内 1%）；
 - 因子 IC 走 `cli strat ic --universe A0`，落 `fact_factor_ic`；`cli strat meta` 会把权重写 `fact_strategy_weight`、市场状态写 `fact_regime_state`、成员快照写 `dim_universe_member_history`；
 - 研究策略绑定到股票池后（池详情「策略配置条」），池任务会按 `{strategy_id}_{pool}` 写目标组合快照，并自动刷新跟踪净值与模拟账户；
-- 日志：`logs/market_backfill.log`、`logs/statements.log`；两个任务都会写 SQLite，尽量避让 `daily/recover`。
-- 财务口径补齐：利润表只入 `revenue/net_profit/eps/bps/roe/ocf_ps`（`src='em:yjbb'`，按报告期批量、`pub_date` 取最新公告日期）；因子层再派生 `equity = total_assets - total_liabilities`、`shares = equity/bps`（缺失时用 `net_profit/eps`）、`ocf = ocf_ps × shares`，因此全 A 都能算估值与现金流类因子。`--income-force` 可忽略水位重拉全部报告期。
+- 日志：`logs/market_backfill.log`、`logs/statements.log`、`logs/overnight_research.log`；写库任务尽量避让 `daily/recover`。
+- 财务口径补齐：利润表只入 `revenue/net_profit/eps/bps/roe/ocf_ps`（`src='em:yjbb'`，按报告期批量、`pub_date` 取法定披露截止日）；因子层再派生 `equity = total_assets - total_liabilities`、`shares = equity/bps`（缺失时用 `net_profit/eps`）、`ocf = ocf_ps × shares`，因此全 A 都能算估值与现金流类因子。`--income-force` 可忽略水位重拉全部报告期。
 
 ---
 
@@ -234,7 +241,9 @@ curl -s http://localhost:8000/api/tracking | head -c 400
 | 目标组合日期不是最新交易日 | 最新日滚动因子为空（历史 `pct_chg` 有缺口） | 跑 `cli recover --lookback 30` 补齐后重算 |
 | 自然语言策略「解析失败」 | 未配置 LLM（`OPENAI_API_KEY`），或模型返回了白名单外的指标 | 展开「手动编辑 JSON」直接回测；或在服务器上用 `cli nl --spec-file spec.json --universe C0` |
 | 策略回测提示「股票池为空 / 无行情数据」 | 池成员未拉取行情，或区间不足 30 个交易日 | 先在池详情点「启动/更新」，再重跑；缩短条件或放宽区间 |
-| 进程「无报错直接消失」 | 被内核 OOM 杀掉（典型：全 A 级别的回测/因子一次性加载） | `journalctl -k --since "-2h" \| grep -i "out of memory"` 确认；用 `--universe` 限定池（回测加载已按池在 SQL 层过滤），或拆分任务分批跑 |
+| 进程「无报错直接消失」 | 被内核 OOM 杀掉（典型：全 A 级别的回测/因子一次性加载） | `journalctl -k --since "-2h" \| grep -i "out of memory"` 确认；用 `--universe` 限定池（回测加载已按池在 SQL 层过滤），研究因子改用 `cli research-cache` 分因子落盘；`common/mem.py` 会在可用内存低于 6 GB 时主动中止 |
+| 研究页 503「缓存未就绪」 | Web 端不再在线重算全 A 因子（防止 OOM） | 执行 `cli research-cache --universe A0`（可中断续跑），完成后刷新页面 |
+| 研究页数据比行情晚一天 | 数据源分批发布时，面板会剔除当日不完整行情（覆盖 < 近 20 日中位数一半） | 正常保护；等数据源发布完整后重跑 `cli research-cache` |
 | `pgrep -f "cli daily"` 显示在跑但日志已停 | `pgrep -f` 会匹配到自己那条含关键字的命令 | 用 `ps -eo pid,etime,args \| grep "cli daily"` 或看日志末行/`task_log` 判断 |
 
 ---
@@ -294,3 +303,4 @@ cd /data02/stock-cash-streaming
 | 2026-10-29 | 补充池任务（自定义股票池）状态查看与重试说明 |
 | 2026-11-02 | 模拟持仓（`/api/paper`）与自然语言策略（`/api/nl`）的排查条目 |
 | 2026-11-04 | 新增 5.1 研究平台数据维护（全 A 行情/行业/指数/财报、因子缓存、`cli market` / `cli strat`） |
+| 2026-11-05 | 研究缓存改为按因子落盘 + 懒加载；新增 `cli research-cache`、内存护栏与夜间脚本；每日流水线增加行情发布完整性护栏 |

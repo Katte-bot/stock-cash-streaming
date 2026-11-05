@@ -92,8 +92,10 @@ def run_recovery(
         result["quote_after"] = after
         dates = _quote_dates(repo)
 
-        # 2) 全量重算因子（滚动窗口按交易日序列计算）
-        result["steps"]["factors"] = compute_all(repo)
+        # 2) 全量重算因子（滚动窗口按交易日序列计算；只算日更池成员）
+        from ..ingest.incremental import _target_symbols
+
+        result["steps"]["factors"] = compute_all(repo, symbols=_target_symbols(repo))
 
         # 3) 信号
         sigs = generate_signals(repo)

@@ -24,9 +24,37 @@ from ..strategy.tracking import simulate_tracking
 from .pool_jobs import release_job_lock, run_enabled_pool_jobs, try_acquire_job_lock
 
 
+MIN_COVERAGE_RATIO = 0.9  # 当日行情覆盖不足上一交易日的 90% 视为数据源未发布完整
+
+
 def _latest_quote_date(repo) -> str | None:
     r = repo.query("SELECT MAX(trade_date) AS d FROM fact_quote")
     return r[0]["d"] if r else None
+
+
+def _quote_coverage(repo) -> tuple[int, int]:
+    """当日/上一交易日「日更股票池」的行情覆盖标的数。
+
+    腾讯 hfq 在收盘后分批发布当日日线：若只拿到零星几只就继续算因子，
+    截面评分会整列缺失（曾导致目标组合 top 为空、除零中断）。
+    这里只统计日更覆盖的池成员（板块成分 + 自定义池），全 A 研究行情是按需
+    回填的，不能用来判断当日是否发布完整。
+    """
+    from ..ingest.incremental import _target_symbols
+
+    syms = _target_symbols(repo)
+    if not syms:
+        return 0, 0
+    ph = ",".join("?" for _ in syms)
+    rows = repo.query(
+        f"SELECT trade_date, COUNT(*) AS n FROM fact_quote "
+        f"WHERE symbol IN ({ph}) GROUP BY trade_date "
+        f"ORDER BY trade_date DESC LIMIT 2", tuple(syms))
+    if not rows:
+        return 0, 0
+    latest = int(rows[0]["n"])
+    prev = int(rows[1]["n"]) if len(rows) > 1 else 0
+    return latest, prev
 
 
 def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
@@ -60,15 +88,28 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
         after = _latest_quote_date(repo)
         result["quote_after"] = after
         if after != today and not force:
-            result.update(status="skipped",
+            result.update(status="skipped", retryable=True,
                           reason=f"行情未更新到今日（最新 {after}）")
+            return result
+        today_n, prev_n = _quote_coverage(repo)
+        result["quote_coverage"] = {"today": today_n, "prev": prev_n}
+        if not force and after == today and prev_n and today_n < prev_n * MIN_COVERAGE_RATIO:
+            result.update(status="skipped", retryable=True,
+                          reason=(f"{today} 行情仅覆盖 {today_n} 只（上一交易日 {prev_n} 只），"
+                                  f"数据源尚未发布完整"))
             return result
 
         # 2) 因子（v2 技术/资金流 + v3 基本面）
-        result["steps"]["factors"] = compute_all(repo)
+        # 只算「日更池」成员（板块成分 + 内置/自定义池）：全 A 研究因子由
+        # research-cache 按需在面板上计算，若每日对全市场重算会写入 1.7 亿行、
+        # 峰值 10 GB+ 且耗时 20 分钟以上。
+        from ..ingest.incremental import _target_symbols
+
+        syms = _target_symbols(repo)
+        result["steps"]["factors"] = compute_all(repo, symbols=syms)
         try:
             result["steps"]["fundamentals"] = compute_fundamental_factors(
-                repo, symbols=universe_symbols(repo, C0))
+                repo, symbols=syms or universe_symbols(repo, C0))
         except Exception as e:  # noqa: BLE001
             logger.warning(f"基本面因子重算失败（候选策略将缺估值分）: {e}")
             result["steps"]["fundamentals"] = {"error": str(e)}

@@ -437,3 +437,92 @@ def test_sync_earnings_events(repo):
     rows = repo.query("SELECT * FROM fact_earnings_event WHERE symbol='600000'")
     assert any(r["announce_ret_1d"] is not None for r in rows)
     assert all(r["pub_date"] for r in rows)
+
+
+# ---------- 研究缓存：分块读取、按因子落盘、内存护栏 ----------
+
+def test_load_stored_factors_chunked_pivot(repo):
+    """按股票分段读取并透视：结果应与直接透视一致，且为 float32。"""
+    from stock_cash_streaming.features.cache import load_stored_factors
+
+    dates = ["2024-01-02", "2024-01-03", "2024-01-04"]
+    syms = [f"60000{i}" for i in range(6)]
+    rows = [{"factor": f, "symbol": s, "trade_date": d, "version": "v3",
+             "value": float(i + j)}
+            for f in ("roe_ttm", "ep_ttm")
+            for i, s in enumerate(syms) for j, d in enumerate(dates)]
+    repo.upsert("fact_factor", rows, ["factor", "symbol", "trade_date", "version"])
+
+    out = load_stored_factors(repo, ["roe_ttm", "ep_ttm"], ["v2", "v3"], syms, None, None,
+                              chunk=2)
+    assert set(out) == {"roe_ttm", "ep_ttm"}
+    got = out["roe_ttm"]
+    assert got.dtypes.iloc[0] == "float32"
+    assert list(got.index) == dates and list(got.columns) == syms
+    assert got.loc["2024-01-03", "600002"] == 3.0
+
+
+def test_factor_parts_roundtrip(tmp_path):
+    """因子分文件落盘/读取，损坏文件应视为缺失。"""
+    from stock_cash_streaming.features import cache as fcache
+
+    d = tmp_path / "part"
+    panel = _panel(n_days=40, n_sym=3)
+    fcache._write_factor(d, "vol_20", panel.ret)
+    fcache._write_manifest(d, "stamp1")
+    got, missing = fcache._load_parts(d, ["vol_20", "ret_20"])
+    assert list(got) == ["vol_20"] and missing == ["ret_20"]
+    assert got["vol_20"].dtypes.iloc[0] == "float32"
+    (d / "factors" / "vol_20.pkl").write_bytes(b"broken")
+    _, missing = fcache._load_parts(d, ["vol_20"])
+    assert missing == ["vol_20"]
+
+
+def test_build_into_resumes_existing_parts(tmp_path, repo, monkeypatch):
+    """已落盘的因子不重算，只补缺失的；manifest 记录全部因子。"""
+    from stock_cash_streaming.features import cache as fcache
+
+    panel = _panel(n_days=30, n_sym=3)
+    d = tmp_path / "part"
+    fcache._write_factor(d, "vol_20", panel.ret)
+    calls = {"tech": 0}
+
+    def _tech(_panel):
+        calls["tech"] += 1
+        return {"vol_20": panel.ret, "ret_20": panel.ret}
+
+    monkeypatch.setattr(fcache, "compute_all_panel_factors", _tech)
+    monkeypatch.setattr(fcache, "load_stored_factors", lambda *a, **k: {})
+    out = fcache._build_into(repo, panel, d, "stamp2", names=["ret_20"], with_v5=False)
+    assert set(out) == {"ret_20"} and calls["tech"] == 1
+    manifest = fcache._manifest(d)
+    assert {"vol_20", "ret_20"} <= set(manifest["factors"])
+
+
+def test_memory_guard_aborts_when_tight():
+    from stock_cash_streaming.common.mem import MemoryGuardError, ensure_memory
+
+    with pytest.raises(MemoryGuardError):
+        ensure_memory(10 ** 6, "测试")
+
+
+def test_load_panel_drops_partial_last_day(repo):
+    """收盘后数据源分批发布：末日覆盖不足一半时应从面板剔除。"""
+    from stock_cash_streaming.features.panel import load_panel
+
+    syms = ["600000", "600001", "600002"]
+    dates = pd.bdate_range("2024-01-02", periods=25).strftime("%Y-%m-%d")
+    rows = [{"symbol": s, "trade_date": d, "close": 10.0 + i, "pct_chg": 0.0,
+             "amount": 1e8, "turnover": 1.0, "volume": 1e6,
+             "open": 10.0, "high": 10.5, "low": 9.5}
+            for d in dates for i, s in enumerate(syms)]
+    partial = "2024-02-06"
+    rows.append({"symbol": syms[0], "trade_date": partial, "close": 12.0, "pct_chg": 0.0,
+                 "amount": 1e8, "turnover": 1.0, "volume": 1e6,
+                 "open": 12.0, "high": 12.5, "low": 11.5})
+    repo.upsert("fact_quote", rows, ["symbol", "trade_date"])
+
+    panel = load_panel(repo, universe=None, symbols=syms)
+    assert panel.close.index[-1] == dates[-1]
+    assert partial not in panel.close.index
+

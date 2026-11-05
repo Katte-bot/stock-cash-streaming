@@ -1,5 +1,6 @@
 """每日增量拉取：行情（腾讯 hfq）、个股资金流快照、板块资金流（同花顺）。"""
 
+import threading
 from datetime import datetime, timedelta
 from functools import lru_cache
 
@@ -13,6 +14,32 @@ from .universe import load_sectors, load_seed_members
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _with_timeout(fn, timeout: int, default):
+    """在守护线程里执行数据源调用，超时直接放弃。
+
+    腾讯全市场快照/同花顺板块接口偶发长连接不返回（requests 的 timeout 只覆盖
+    连接与读取间隙），曾让每日流水线在最后一步挂住半小时。资金流快照只是辅助
+    数据，宁可跳过也不要阻塞整条流水线。
+    """
+    box: dict = {}
+
+    def _run() -> None:
+        try:
+            box["value"] = fn()
+        except Exception as e:  # noqa: BLE001
+            box["error"] = e
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        logger.warning(f"数据源调用超过 {timeout}s 未返回，跳过本步")
+        return default
+    if "error" in box:
+        raise box["error"]
+    return box.get("value", default)
 
 
 @lru_cache(maxsize=1)
@@ -103,7 +130,8 @@ def run_incremental(ds: DataSource, repo: Repository, lookback_days: int = 10) -
     # 1) 行情
     for i, sym in enumerate(symbols, 1):
         try:
-            df = ds.daily_prices(sym, start, today_compact)
+            df = _with_timeout(
+                lambda s=sym: ds.daily_prices(s, start, today_compact), 90, pd.DataFrame())
             if not df.empty:
                 _fill_pct_chg(repo, sym, df)
                 rows = df.to_dict("records")
@@ -121,7 +149,7 @@ def run_incremental(ds: DataSource, repo: Repository, lookback_days: int = 10) -
 
     # 2) 个股资金流（腾讯全市场快照，一次调用）
     try:
-        spot = ds.spot()
+        spot = _with_timeout(ds.spot, 180, pd.DataFrame())
         sub = spot[spot["symbol"].isin(set(symbols))]
         rows = [{
             "symbol": r.symbol,
@@ -141,7 +169,8 @@ def run_incremental(ds: DataSource, repo: Repository, lookback_days: int = 10) -
     for sec in load_sectors():
         cate = "concept" if sec["type"] == "concept" else "industry"
         try:
-            sf = ds.sector_fund_flow(cate=cate, period="即时")
+            sf = _with_timeout(
+                lambda c=cate: ds.sector_fund_flow(cate=c, period="即时"), 90, pd.DataFrame())
             if not sf.empty and sec["name"] in set(sf["行业"]):
                 row = sf[sf["行业"] == sec["name"]].iloc[0]
                 net = row.get("净额")

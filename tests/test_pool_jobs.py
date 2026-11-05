@@ -2,9 +2,10 @@
 
 import pytest
 
-from stock_cash_streaming.pipeline import pool_jobs
+from stock_cash_streaming.pipeline import daily, pool_jobs
 from stock_cash_streaming.research.pool_admin import create_pool
 from stock_cash_streaming.storage.repository import open_repository
+from stock_cash_streaming.strategy import portfolio
 
 LATEST = "2026-10-26"
 
@@ -162,3 +163,45 @@ def test_enabled_pool_jobs_isolated(repo, monkeypatch):
     assert out["C0"]["status"] == "ok"
     assert out["U1"]["status"] == "ok"
     assert out["U2"]["status"] == "failed"
+
+
+# ---------- 每日流水线：行情发布完整性护栏 ----------
+
+def test_quote_coverage_detects_partial_day(repo):
+    """数据源分批发布日线时，当日覆盖标的数应明显少于上一交易日。"""
+    now = "2026-11-05 16:30:00"
+    rows = [{"symbol": f"60000{i}", "trade_date": "2026-11-04", "close": 10.0,
+             "amount": 1e8, "src": "test", "fetched_at": now} for i in range(5)]
+    rows.append({"symbol": "600000", "trade_date": "2026-11-05", "close": 10.0,
+                 "amount": 1e8, "src": "test", "fetched_at": now})
+    repo.upsert("fact_quote", rows, ["symbol", "trade_date"])
+    # 日更股票池只统计池成员，全 A 研究行情不参与判断
+    repo.upsert("dim_universe_member",
+                [{"universe_id": "C1", "symbol": f"60000{i}", "sector_code": "S1"}
+                 for i in range(5)], ["universe_id", "symbol"])
+    assert daily._quote_coverage(repo) == (1, 5)
+
+
+def test_with_timeout_skips_hung_call():
+    """数据源长连接不返回时，辅助步骤应超时跳过而不是卡住流水线。"""
+    import time as _t
+
+    from stock_cash_streaming.ingest.incremental import _with_timeout
+
+    assert _with_timeout(lambda: _t.sleep(1.5) or "x", 0.1, "default") == "default"
+    assert _with_timeout(lambda: 42, 1, None) == 42
+
+
+def test_target_portfolio_returns_error_when_no_scores(repo):
+    """评分整列为空（截面数据不完整）时返回错误而不是除零中断。"""
+    create_pool(repo, "测试池", [{"symbol": "600406", "name": "国电南瑞"}])
+    now = "2026-11-05 08:00:00"
+    repo.upsert("dim_stock", [{"symbol": "600406", "name": "国电南瑞",
+                               "market": "sh", "updated_at": now}], ["symbol"])
+    repo.upsert("fact_factor", [
+        {"factor": f, "symbol": "600406", "trade_date": LATEST, "version": "v2", "value": v}
+        for f, v in (("vol_20", 20.0), ("amount_20d", 0.0), ("ret_20", 1.0))
+    ], ["factor", "symbol", "trade_date", "version"])
+    res = portfolio.build_target_portfolio(repo, trade_date=LATEST, universe_id="U1")
+    assert res["positions"] == []
+    assert "error" in res

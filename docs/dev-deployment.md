@@ -178,9 +178,13 @@ nohup .venv/bin/python -m stock_cash_streaming.cli market \
 
 # 覆盖度自检（含 income_coverage）
 .venv/bin/python -m stock_cash_streaming.cli market --index
+
+# 研究因子缓存（按因子落盘；Web 端只读，必须先在 CLI 建好）
+.venv/bin/python -m stock_cash_streaming.cli research-cache --universe C0,C1,C2,C3
+.venv/bin/python -m stock_cash_streaming.cli research-cache --universe A0
 ```
 
-> 研究因子按需计算并缓存到 `data/research_cache/`（TTL 7 天），不落 SQLite；删目录即强制重算。缓存不会自动清理旧数据版本，重算后旧文件会在下次写缓存时按前缀清理。
+> 研究因子按需计算并缓存在 `data/research_cache/<key>_<数据版本戳>/`（`panel.pkl` + `factors/*.pkl` + `manifest.json`），不落 SQLite；删目录即强制重算。写盘按因子进行，中断后重跑同一命令只补缺失项；可用内存低于 `SCS_MIN_AVAIL_GB`（默认 6 GB）时会主动中止。每日数据变化会产生新版本目录，旧目录保留最近 2 份供 Web 降级使用，其余自动清理。
 
 ### 1.5 放行端口
 

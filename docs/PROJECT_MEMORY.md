@@ -883,8 +883,26 @@ python -m stock_cash_streaming.cli experiments --universe C0
 
 > 运维提示：定位「进程消失」先看 `journalctl -k | grep -i "out of memory"`；`pgrep -f "cli daily"` 会匹配到自己执行的命令行，容易误判为仍在运行，改用 `ps -eo pid,args | grep "^ *[0-9]* .*cli daily"` 或看日志末行。
 
+**研究缓存重构与 OOM 二次修复（2026-11-05 晚）**
 
-**测试**：`tests/test_research_platform.py` 28 项，覆盖注册表（版本数量/重复注册）、v4 全因子无未来函数与残差动量剔除近月、v5 报告期派生指标与公告时点对齐、报告期合并与股本/现金流派生（`test_report_panel_derives_income_metrics`）、行情按池加载与价格断点剔除（`test_load_quotes_filters_symbols_and_bad_prices`）、缩尾/Z/行业中性、策略构建、因子动量权重上限、IC 识别能力、NL 配置校验、容量约束、walk-forward 分段、池快照写入、成员月度快照幂等、财报事件落库；全量 `pytest` 68 项通过。
+现象：同日 16:54 `uvicorn` 被内核杀死（`anon-rss:40.4 GB`），正在跑的 `cli daily` 也随之消失；日志停在 `面板加载：2144 日 × 5199 只`。触发点不是回测，而是**研究页在数据版本变化后首次请求**：缓存 key 含行情最新交易日，16:10 每日流水线更新行情后旧缓存必然失效，第一次打开因子页就在 Web 进程里全量重算。
+
+原因：`features/cache.py::load_stored_factors` 把 v2+v3 共 31 个因子的全部长表读成一个大 DataFrame（1.37 亿行，`symbol/trade_date` 为字符串对象），再拼接、再透视；峰值 = 长表 + 透视副本，直接 40 GB。
+
+修复（分四层）：
+1. **目录化缓存 + 按因子懒加载**：`data/research_cache/<key>_<数据版本戳>/{panel.pkl, factors/<因子名>.pkl, manifest.json}`；读接口只加载请求用到的因子（IC 1 个、相关性 12 个），`allow_build=False` 时绝不重算，缓存缺失返回 503 并提示 `cli research-cache`；当日数据已更新但新缓存未建好时，**降级读取上一版目录**（响应 `cache=stale`）。
+2. **分块读取**：`load_stored_factors` 改为「因子 × 600 只」分段几何透视并立即释放长表；`load_panel` 同样按 600 只分段透视（原来一次性 1100 万行长表）。
+3. **内存护栏**：`common/mem.py`（`MemoryGuardError` / `ensure_memory`），每批计算前检查 `MemAvailable`，低于 `SCS_MIN_AVAIL_GB`（默认 6 GB）主动中止并保留已落盘因子；外部脚本 `scripts/overnight_research.sh` 另设 3 GB 看门狗直接终止子进程。
+4. **可续跑构建**：新增 `cli research-cache --universe A0`（`--force/--strict`），逐因子写盘、已存在即跳过；`scripts/overnight_research.sh` 串联「小池缓存 → A0 缓存 → 首批 5 策略重跑」。
+
+顺带修复的三个数据/健壮性问题：
+- 数据源收盘后分批发布日线，`load_panel` 现在会剔除「当日覆盖 < 近 20 日覆盖中位数一半」的尾部交易日，避免半天行情进入面板与因子缓存；每日流水线也新增同类护栏（日更池覆盖 < 上一交易日 90% 时 `skipped/retryable`，调度器每 20 分钟重试、最多 6 次），不再在只有零星几只行情时硬算因子导致截面全空；
+- `build_target_portfolio` 在评分为空时返回 `{error, positions: []}`，不再 `ZeroDivisionError` 中断整条流水线；
+- 腾讯全市场快照接口偶发长连接不返回（`requests` 的 timeout 只覆盖连接与读取间隙），曾让流水线在最后一步挂住半小时；`ingest/incremental.py::_with_timeout` 把逐股行情、spot、板块资金流都放进守护线程并设超时（90/180/90 秒），超时即跳过该辅助数据。
+
+实测（本机 46 GB）：A0 缓存 67 个因子 / 2143 日 × 5199 只，构建 **4 分 21 秒、峰值 5.5 GB**（原 40 GB+），磁盘 3.2 GB；C0~C3 各 < 10 秒、峰值 < 0.3 GB。Web 端 IC 接口 2.5 s、相关性 0.5 s，uvicorn 常驻 **0.56 GB**。重跑后的 A0 结果：value_quality 10.18%/0.64、conservative_investment 15.52%/0.70、residual_momentum -14.38%/-0.29、pead -5.17%/-0.07、factor_momentum 0.77%/0.15（前四个与上一版一致或仅因剔除不完整交易日微调；因子动量受候选权重滚动窗口变化影响最大）。
+
+**测试**：`tests/test_research_platform.py` 33 项（新增分块读取、因子分文件往返/损坏容错、增量续跑、内存护栏、剔除不完整交易日），`tests/test_pool_jobs.py` 7 项（新增行情发布完整性护栏、空评分组合保护、数据源超时跳过）；全量 `pytest` 76 项通过。
 
 **已知限制**
 - 小池（如 C1 8 只）分组收益样本不足（要求每组 ≥5 只、合计 ≥50 只），分组图仅在全 A 池有意义；

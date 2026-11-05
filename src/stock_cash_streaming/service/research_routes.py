@@ -50,6 +50,25 @@ def _with_repo(fn):
         repo.close()
 
 
+def _load_research(repo, universe: str, start: str | None = None, end: str | None = None,
+                   names: list[str] | None = None, allow_build: bool = False):
+    """读取研究缓存；只读接口不允许在线重算（重算只在 CLI 里做）。
+
+    缓存缺失/过期时返回 503 并提示执行 `cli research-cache`，
+    避免 Web 进程被全 A 因子重算拖到几十 GB 后被内核 OOM kill。
+    """
+    from ..common.mem import MemoryGuardError
+    from ..features.cache import CacheNotReady, load_cached_factors
+
+    try:
+        return load_cached_factors(repo, universe, start, end, names=names,
+                                   allow_build=allow_build)
+    except CacheNotReady as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except MemoryGuardError as e:
+        raise HTTPException(status_code=503, detail=f"内存余量不足，已主动中止：{e}") from e
+
+
 def _latest_run(repo, strategy_id: str, universe: str) -> dict | None:
     rows = repo.query(
         "SELECT * FROM fact_strategy_run WHERE strategy_id=? AND universe_id=? "
@@ -152,6 +171,11 @@ def strategy_backtest(strategy_id: str, payload: BacktestIn) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
+        from ..common.mem import MemoryGuardError
+
+        if isinstance(e, MemoryGuardError):
+            raise HTTPException(status_code=503,
+                                detail=f"内存余量不足，已主动中止：{e}") from e
         raise HTTPException(status_code=500, detail=f"回测失败：{e}") from e
 
 
@@ -220,11 +244,10 @@ def factors(universe: str = "A0") -> dict:
 @router.get("/factors/{name}/ic")
 def factor_ic(name: str, universe: str = "A0", horizon: int = 5,
               start: str | None = None, end: str | None = None) -> dict:
-    from ..features.cache import load_cached_factors
     from ..research.ic import compute_ic, quantile_returns, summarize
 
     def _run(repo):
-        panel, factors, cache_info = load_cached_factors(repo, universe, start, end)
+        panel, factors, cache_info = _load_research(repo, universe, start, end, names=[name])
         if name not in factors:
             raise HTTPException(status_code=404, detail="因子不存在或无数据")
         ic_df = compute_ic(panel, {name: factors[name]}, horizon=horizon)
@@ -282,7 +305,7 @@ def _ic_by_regime(repo, series) -> dict[str, dict]:
 @router.get("/factors/corr")
 def factor_corr(universe: str = "A0", names: str = "", date: str | None = None) -> dict:
     """因子截面相关性（默认最新交易日，Spearman）。"""
-    from ..features.cache import load_cached_factors
+    from ..features.cache import available_factors
 
     picks = [x.strip() for x in (names or "").split(",") if x.strip()]
     default = ["vol_120", "downside_vol_120", "ivol_60", "resid_mom_126", "resid_mom_252",
@@ -290,10 +313,12 @@ def factor_corr(universe: str = "A0", names: str = "", date: str | None = None) 
                "capex_to_assets", "sue"]
 
     def _run(repo):
-        panel, factors, cache_info = load_cached_factors(repo, universe, None, None)
-        picked = [n for n in (picks or default) if n in factors]
+        avail = set(available_factors(repo, universe))
+        picked = [n for n in (picks or default) if n in avail]
         if len(picked) < 2:
-            raise HTTPException(status_code=400, detail="可用因子不足 2 个")
+            raise HTTPException(status_code=503,
+                                detail="因子缓存未就绪，请先运行 cli research-cache")
+        panel, factors, cache_info = _load_research(repo, universe, names=picked)
         d = date or panel.close.index[-1]
         frame = pd.DataFrame({n: factors[n].loc[d] for n in picked if d in factors[n].index})
         frame = frame.dropna(how="all")
@@ -360,7 +385,6 @@ def meta_weights() -> dict:
 @router.post("/meta/run")
 def meta_run(payload: MetaIn) -> dict:
     """重算因子动量权重并落库（同时刷新市场状态表）。"""
-    from ..features.cache import load_cached_factors
     from ..research.factor_momentum import compute as compute_meta
     from ..research.regime import sync_regime_state
 
@@ -368,7 +392,7 @@ def meta_run(payload: MetaIn) -> dict:
         ensure_registered()
         spec = get_strategy("factor_momentum")
         comps = payload.components or list(spec.defaults.get("components") or [])
-        panel, factors, cache_info = load_cached_factors(
+        panel, factors, cache_info = _load_research(
             repo, payload.universe, payload.start, payload.end)
         if panel.close.empty:
             raise HTTPException(status_code=400, detail="样本域无行情数据")

@@ -494,6 +494,43 @@ def _cmd_market(args) -> None:
         repo.close()
 
 
+def _cmd_research_cache(args) -> None:
+    """预构建研究因子缓存：逐因子落盘、可续跑、内存余量不足时主动中止。"""
+    from .common.mem import available_gb, rss_gb
+    from .features.cache import cache_status, load_cached_factors
+
+    repo = open_repository()
+    try:
+        for uni in [x.strip() for x in args.universe.split(",") if x.strip()]:
+            print(f"\n===== 研究缓存：{uni} =====")
+            print(f"  开始前：可用内存 {available_gb():.1f} GB，进程 RSS {rss_gb():.1f} GB")
+            try:
+                panel, factors, info = load_cached_factors(
+                    repo, uni, args.start, args.end, allow_build=True, force=args.force)
+            except Exception as e:  # noqa: BLE001
+                print(f"  失败：{type(e).__name__}: {e}")
+                print("  已落盘的因子会保留，修复后重跑同一命令即可续算。")
+                if args.strict:
+                    raise
+                continue
+            if panel.close.empty:
+                print("  面板为空（该池无行情）")
+                continue
+            print(f"  状态 {info.get('cache')}，目录 {info.get('dir')}")
+            print(f"  面板 {panel.close.shape[0]} 日 × {panel.close.shape[1]} 只，"
+                  f"因子 {len(factors)} 个")
+            print(f"  结束后：可用内存 {available_gb():.1f} GB，进程 RSS {rss_gb():.1f} GB")
+        rows = cache_status()
+        if rows:
+            print("\n===== 缓存目录 =====")
+            print(f"  {'目录':<52}{'因子':>5}{'大小GB':>8}{'天数':>6}{'就绪':>5}")
+            for r in rows[:10]:
+                print(f"  {r['dir']:<52}{r['factors']:>5}{r['size_gb']:>8.2f}"
+                      f"{r['age_days']:>6.1f}{'Y' if r['ready'] else 'N':>5}")
+    finally:
+        repo.close()
+
+
 def _cmd_backup(args) -> None:
     """数据库在线备份 + 体积报告（建议每周一次，保留最近 N 份）。"""
     import sqlite3
@@ -1176,6 +1213,14 @@ def main(argv: list[str] | None = None) -> None:
     p_bak.add_argument("--keep", type=int, default=2, help="保留最近几份（默认 2）")
     p_bak.add_argument("--force", action="store_true", help="当天已有备份也覆盖")
     p_bak.set_defaults(func=_cmd_backup)
+
+    p_rc = sub.add_parser("research-cache", help="预构建研究因子缓存（逐因子落盘、可续跑）")
+    p_rc.add_argument("--universe", default="A0", help="股票池 ID，可逗号分隔（默认 A0）")
+    p_rc.add_argument("--start", default=None, help="起始日期 YYYY-MM-DD，默认全区间")
+    p_rc.add_argument("--end", default=None, help="结束日期 YYYY-MM-DD，默认最新")
+    p_rc.add_argument("--force", action="store_true", help="忽略已有缓存，重新计算")
+    p_rc.add_argument("--strict", action="store_true", help="出错立即退出（默认跳过该池继续）")
+    p_rc.set_defaults(func=_cmd_research_cache)
 
     p_uni = sub.add_parser("universe", help="股票池：查看 C0/C1、刷新 C1、补拉数据")
     p_uni.add_argument("--id", default="C0", help="股票池 ID（C0/C1/C2...）")

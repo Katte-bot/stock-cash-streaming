@@ -692,7 +692,7 @@
     <div id="rtabFactors" hidden>
       <div class="card">
         <h2>因子实验室 <span class="tag">IC / 分组收益</span></h2>
-        <p class="desc">IC 为截面 RankIC 均值；分组收益仅用于研究展示，不代表可交易收益</p>
+        <p class="desc">IC 为截面 RankIC 均值；分组收益仅用于研究展示，不代表可交易收益。以上均为历史研究，不构成投资建议。</p>
         <div class="rbar">
           <label class="field">因子<select class="input" id="fName"></select></label>
           <label class="field">持有期
@@ -947,7 +947,10 @@ function parseHash(){
     view:'research', tab:'lib', detail: decodeURIComponent(h.slice(16)), pool: state.universe};
   if (h === 'research' || h.startsWith('research?')) {
     const q = h.includes('?') ? h.slice(h.indexOf('?') + 1) : '';
-    const tab = (new URLSearchParams(q).get('tab') || 'lib');
+    let tab = (new URLSearchParams(q).get('tab') || 'lib');
+    if (tab === 'factor') tab = 'factors';      // 兼容单数别名
+    const known = ['lib','compare','factors','meta','nl'];
+    if (!known.includes(tab)) tab = 'lib';
     return {view:'research', tab, pool: state.universe};
   }
   if (h === 'nl' || h.startsWith('nl/')) return {view:'nl', pool: state.universe};
