@@ -320,6 +320,10 @@
       <button class="nav-item" data-nav="nl" id="navNL">策略研究</button>
     </div>
     <div class="nav-group">
+      <div class="nav-title">ETF 分析</div>
+      <button class="nav-item" data-nav="etf" id="navETF">高股息ETF广发 · 159207</button>
+    </div>
+    <div class="nav-group">
       <div class="nav-title">操作</div>
       <button class="nav-item" data-nav="action" id="navNewPool">＋ 新建股票池</button>
     </div>
@@ -832,6 +836,99 @@
     </div>
   </section>
 
+  <!-- ==================== 高股息ETF 分析 ==================== -->
+  <section class="page" id="pageETF" hidden>
+    <div class="card">
+      <h2>高股息ETF广发 159207 <span class="tag" id="etfTag">--</span></h2>
+      <p class="desc">跟踪中证智选高股息策略指数（932305）· 最新前十大预测 · 调仓规则验证</p>
+      <div class="pfbar">
+        <button class="btn primary" id="etfRunBtn">Run · 按最新行情分析</button>
+        <span class="reasons" id="etfMsg">加载中…</span>
+      </div>
+      <div class="report" id="etfLog" style="display:none;max-height:240px;overflow:auto;white-space:pre-wrap"></div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="lab">最新价格日</div><div class="val" id="etfAsOf">--</div><div class="hint" id="etfReturnAsOf">收益估计 --</div></div>
+      <div class="kpi"><div class="lab">指数权重日</div><div class="val" id="etfWeightAsOf">--</div><div class="hint">中证 932305</div></div>
+      <div class="kpi"><div class="lab">前十大权重合计</div><div class="val" id="etfTop10Sum">--</div><div class="hint">按最新价投影</div></div>
+      <div class="kpi"><div class="lab">最近运行</div><div class="val" id="etfRunAt">--</div><div class="hint" id="etfRunState">--</div></div>
+    </div>
+
+    <div class="card">
+      <h2>2026Q4 前十大预测 <span class="tag" id="etfPredTag">--</span></h2>
+      <p class="desc">按综合概率排序；锁定 ≥80%，较稳 60%~80%，待定 30%~60%，概率较低 &lt;30%</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>代码</th><th>名称</th><th>行业</th><th class="num">当前权重%</th><th class="num">9/30以来</th><th class="num">综合概率</th><th class="num">中性</th><th class="num">动量</th><th class="num">反转</th><th>分层</th></tr></thead>
+          <tbody id="etfPredBody"><tr><td colspan="11" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>9.30 以来贡献与滞涨 <span class="tag" id="etfSinceTag">--</span></h2>
+      <p class="desc">2026Q3 前十大按当时权重的收益贡献；贡献越低越“滞涨”</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>名称</th><th>代码</th><th class="num">Q3权重%</th><th class="num">9/30以来</th><th class="num">贡献pp</th></tr></thead>
+          <tbody id="etfSinceBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>六期前十大持仓 <span class="tag">2025中报 → 2026三季报</span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead id="etfHoldHead"></thead>
+          <tbody id="etfHoldBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2>换手指标</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>区间</th><th class="num">新进</th><th class="num">退出</th><th class="num">Jaccard</th><th class="num">权重变动L1%</th><th class="num">秩相关</th></tr></thead>
+            <tbody id="etfTurnBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>规则验证</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>项目</th><th>结果</th></tr></thead>
+            <tbody id="etfValidBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>边界替换观察 <span class="tag">当前第 8~15 名</span></h2>
+      <p class="desc">“需相对第 10 名涨幅”为静态阈值：其他条件不变时，该股需要相对第 10 名多涨多少才能反超</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>代码</th><th>名称</th><th class="num">基准权重%</th><th class="num">综合概率</th><th class="num">需相对第10名涨幅</th></tr></thead>
+          <tbody id="etfBoundBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>完整报告 <span class="tag">Markdown</span></h2>
+      <p class="desc"><a href="/api/etf159207/report" target="_blank">在新窗口打开完整报告</a></p>
+      <details>
+        <summary class="reasons">展开 Markdown 原文</summary>
+        <pre class="report" id="etfReport" style="white-space:pre-wrap;max-height:520px;overflow:auto"></pre>
+      </details>
+    </div>
+  </section>
+
   <footer>
     本系统输出均为基于历史数据的量化研究结果，不构成任何投资建议。股市有风险，入市需谨慎。<br/>
     数据来源：腾讯（行情/快照）、新浪（板块成分/个股资金流）、同花顺（板块资金流）。
@@ -911,6 +1008,7 @@ const state = { data: null, intraday: null, universe: 'C0', view: 'overview' };
 const univState = { data: null };
 const poolsState = { list: [], jobTimer: null };
 const poolModalState = { mode: 'create', poolId: null, items: [] };
+const etfState = { data: null, timer: null, running: false };
 
 function theme(){ return document.documentElement.dataset.theme || 'dark'; }
 function C(){
@@ -954,6 +1052,7 @@ function parseHash(){
     return {view:'research', tab, pool: state.universe};
   }
   if (h === 'nl' || h.startsWith('nl/')) return {view:'nl', pool: state.universe};
+  if (h === 'etf' || h.startsWith('etf?')) return {view:'etf', pool: state.universe};
   return {view:'overview', pool: state.universe};
 }
 function goOverview(){ location.hash = '#/overview'; }
@@ -966,6 +1065,7 @@ function setActiveNav(){
     if (!nav || nav === 'action'){ b.classList.remove('active'); return; }
     const on = nav === 'nl' ? (state.view === 'research' || state.view === 'nl')
       : nav === 'overview' ? state.view === 'overview'
+      : nav === 'etf' ? state.view === 'etf'
       : (state.view === 'pool' && b.dataset.pool === state.universe);
     b.classList.toggle('active', on);
   });
@@ -978,18 +1078,28 @@ function applyView(){
   const isPool = state.view === 'pool';
   const isNL = state.view === 'nl';
   const isResearch = state.view === 'research';
+  const isETF = state.view === 'etf';
   $('pageOverview').hidden = state.view !== 'overview';
   $('pagePool').hidden = !isPool;
   $('pageNL').hidden = !isNL;
   $('pageResearch').hidden = !isResearch;
+  $('pageETF').hidden = !isETF;
+  if (!isETF && etfState.timer){
+    clearInterval(etfState.timer);
+    etfState.timer = null;
+    etfState.running = false;
+    $('etfRunBtn').disabled = false;
+  }
   const pool = isPool ? poolOf(state.universe) : null;
   $('pageTitle').textContent = isResearch ? '策略研究'
-    : (isNL ? '自然语言策略' : (isPool ? poolLabel(state.universe) : '总览'));
+    : (isNL ? '自然语言策略' : (isETF ? '高股息ETF' : (isPool ? poolLabel(state.universe) : '总览')));
   // 池详情只保留一行说明，避免标题重复
   $('pageSub').textContent = isResearch
     ? '策略库 · 策略对比 · 因子实验室 · 因子择时'
     : isNL
     ? '中文描述买卖条件 · LLM 解析为受控规则 · 选择股票池回测'
+    : isETF
+    ? '159207 · 中证智选高股息策略指数（932305）· 前十大预测'
     : isPool
     ? [state.universe,
        pool ? `${pool.members_count} 只` : '',
@@ -1013,6 +1123,8 @@ function applyView(){
   } else if (isNL){
     nlFillUniverses();
     loadNLStrategies();
+  } else if (isETF){
+    loadETF();
   } else {
     renderOverviewNumbers();
     renderPoolCards();
@@ -2836,6 +2948,8 @@ async function removePoolMember(id, symbol){
 }
 
 $('navOverview').onclick = goOverview;
+$('navETF').onclick = () => { location.hash = '#/etf'; };
+$('etfRunBtn').onclick = runETF;
 $('newPoolBtn').onclick = () => openPoolModal('create');
 $('navNewPool').onclick = () => openPoolModal('create');
 $('poolResolveBtn').onclick = resolvePoolCodes;
@@ -2845,6 +2959,233 @@ $('poolModalCancel').onclick = () => $('poolModal').classList.remove('open');
 $('poolModal').onclick = e => { if (e.target.id === 'poolModal') $('poolModal').classList.remove('open'); };
 $('memberModalClose').onclick = () => $('memberModal').classList.remove('open');
 $('memberModal').onclick = e => { if (e.target.id === 'memberModal') $('memberModal').classList.remove('open'); };
+
+/* ---------- 高股息ETF 分析 ---------- */
+function etfEsc(v){
+  return String(v ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function etfNum(v, d=2){
+  return (v === null || v === undefined || isNaN(v)) ? '--' : Number(v).toFixed(d);
+}
+function etfPct(v, d=1){
+  return (v === null || v === undefined || isNaN(v)) ? '--' : (Number(v) * 100).toFixed(d) + '%';
+}
+function etfPctPoint(v, d=2){
+  return (v === null || v === undefined || isNaN(v)) ? '--' : Number(v).toFixed(d) + '%';
+}
+function etfTierTag(t){
+  const cls = t === '锁定' ? 'prod' : (t === '较稳' ? 'cand' : 'res');
+  return `<span class="dot-tag ${cls}">${etfEsc(t || '--')}</span>`;
+}
+function etfEmptyRow(cols, msg){
+  return `<tr><td colspan="${cols}" class="empty">${etfEsc(msg)}</td></tr>`;
+}
+
+function renderETFPrediction(d){
+  const rows = (d.prediction || []).slice(0, 10);
+  $('etfPredBody').innerHTML = rows.length ? rows.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${etfEsc(r.symbol)}</td>
+      <td>${etfEsc(r.name)}</td>
+      <td>${etfEsc(r.industry_l1 || '')}</td>
+      <td class="num">${etfNum(r.weight_base, 2)}</td>
+      <td class="num ${r.ret_since_report > 0 ? 'up' : (r.ret_since_report < 0 ? 'down' : '')}">${etfPct(r.ret_since_report, 2)}</td>
+      <td class="num"><b>${etfPct(r.p_top10_blend, 1)}</b></td>
+      <td class="num">${etfPct(r.p_top10_neutral, 1)}</td>
+      <td class="num">${etfPct(r.p_top10_momentum, 1)}</td>
+      <td class="num">${etfPct(r.p_top10_reversal, 1)}</td>
+      <td>${etfTierTag(r.tier)}</td>
+    </tr>`).join('') : etfEmptyRow(11, '暂无预测结果');
+}
+
+function renderETFSince(d){
+  const s = d.since_last_report || {};
+  $('etfSinceTag').textContent =
+    `50只等权 ${etfPct(s.equal_weight_50, 2)} / Q3前十大 ${etfPct(s.q3_top10_weighted, 2)}`;
+  const rows = (s.rows || []).slice().sort((a, b) =>
+    (b.contrib_pp ?? -1e9) - (a.contrib_pp ?? -1e9));
+  $('etfSinceBody').innerHTML = rows.length ? rows.map(r => `
+    <tr>
+      <td>${etfEsc(r.name)}</td>
+      <td>${etfEsc(r.symbol)}</td>
+      <td class="num">${etfNum(r.weight_pct, 3)}</td>
+      <td class="num ${r.ret_since_report > 0 ? 'up' : (r.ret_since_report < 0 ? 'down' : '')}">${etfPct(r.ret_since_report, 2)}</td>
+      <td class="num">${r.contrib_pp === null || r.contrib_pp === undefined ? '--' : Number(r.contrib_pp).toFixed(3)}</td>
+    </tr>`).join('') : etfEmptyRow(5, '暂无数据');
+}
+
+function renderETFHoldings(d){
+  const rows = d.holdings || [];
+  if (!rows.length){
+    $('etfHoldHead').innerHTML = '';
+    $('etfHoldBody').innerHTML = etfEmptyRow(7, '暂无持仓数据');
+    return;
+  }
+  const dates = [...new Set(rows.map(r => r.report_date))].sort();
+  const labels = {};
+  const byRank = {};
+  rows.forEach(r => {
+    labels[r.report_date] = r.quarter || r.report_date;
+    (byRank[r.rank] = byRank[r.rank] || {})[r.report_date] = r;
+  });
+  $('etfHoldHead').innerHTML = '<tr><th>排名</th>' +
+    dates.map(dt => `<th>${etfEsc(labels[dt])}</th>`).join('') + '</tr>';
+  $('etfHoldBody').innerHTML = Object.keys(byRank)
+    .sort((a, b) => Number(a) - Number(b))
+    .map(rk => {
+      const cells = dates.map(dt => {
+        const x = byRank[rk][dt];
+        return `<td>${x ? `${etfEsc(x.name)}（${etfNum(x.weight_pct, 2)}%）` : ''}</td>`;
+      }).join('');
+      return `<tr><td>${rk}</td>${cells}</tr>`;
+    }).join('');
+}
+
+function renderETFTurnover(d){
+  const rows = d.turnover || [];
+  $('etfTurnBody').innerHTML = rows.length ? rows.map(r => `
+    <tr>
+      <td>${etfEsc(r.prev)} → ${etfEsc(r.curr)}</td>
+      <td class="num">${r.new_count}</td>
+      <td class="num">${r.exit_count}</td>
+      <td class="num">${etfNum(r.jaccard, 2)}</td>
+      <td class="num">${etfNum(r.l1_weight_change_pct, 2)}</td>
+      <td class="num">${etfNum(r.rank_corr_common, 2)}</td>
+    </tr>`).join('') : etfEmptyRow(6, '暂无数据');
+}
+
+function renderETFValidation(d){
+  const v = d.validation || {};
+  const dc = v.dividend_check || {};
+  const wm = v.weight_model || {};
+  const ei = v.etf_vs_index || {};
+  const prob = d.summary?.prob_sum;
+  const rows = [
+    ['成分股连续 3 年分红', `${dc.div_3y_ok ?? '--'} / ${dc.n ?? '--'}`],
+    ['权重模型秩相关', `Spearman ${wm.spearman ?? '--'}（Top10 重合 ${wm.top10_overlap ?? '--'}/10）`],
+    ['ETF vs 指数秩相关', `Spearman ${ei.spearman ?? '--'}（共同 ${ei.n_common ?? '--'} 只）`],
+    ['Q4 有除权事件的成分股', `${dc.q4_ex_count ?? '--'} 只`],
+    ['50 只概率合计', `${prob ?? '--'}（期望 10）`],
+    ['数据基准', `价格 ${d.data_as_of || '--'} / 收益 ${d.return_asof || '--'} / 模拟 ${d.sim_start || '--'} ~ ${d.sim_end || '--'}`],
+  ];
+  $('etfValidBody').innerHTML = rows.map(([k, val]) =>
+    `<tr><td>${etfEsc(k)}</td><td>${etfEsc(val)}</td></tr>`).join('');
+}
+
+function renderETFBoundary(d){
+  const pmap = Object.fromEntries((d.prediction || []).map(r => [r.symbol, r]));
+  const rows = d.boundary_threshold || [];
+  $('etfBoundBody').innerHTML = rows.length ? rows.map(r => {
+    const p = pmap[r.symbol]?.p_top10_blend;
+    const need = r.need_rel_gain_vs_rank10;
+    return `<tr>
+      <td>${etfEsc(r.symbol)}</td>
+      <td>${etfEsc(r.name)}</td>
+      <td class="num">${etfNum(r.weight_base, 3)}</td>
+      <td class="num">${etfPct(p, 1)}</td>
+      <td class="num ${need < 0 ? 'down' : 'up'}">${need === null || need === undefined ? '--' : (need >= 0 ? '+' : '') + (need * 100).toFixed(1) + '%'}</td>
+    </tr>`;
+  }).join('') : etfEmptyRow(5, '暂无数据');
+}
+
+function renderETF(d){
+  etfState.data = d;
+  $('etfTag').textContent = d.fund?.SHORTNAME || '159207';
+  $('etfAsOf').textContent = d.data_as_of || '--';
+  $('etfReturnAsOf').textContent = '收益估计 ' + (d.return_asof || '--');
+  $('etfWeightAsOf').textContent = d.weight_asof || '--';
+  $('etfTop10Sum').textContent = `${etfNum(d.summary?.top10_weight_sum_base, 2)}%`;
+  $('etfRunAt').textContent = (d.generated_at || '--').replace('T', ' ').slice(0, 16);
+  $('etfRunState').textContent = d.status?.running ? 'running'
+    : (d.status?.last_run?.status || (d.generated_at ? 'ok' : '--'));
+  $('etfPredTag').textContent = d.generated_at ? `生成 ${d.generated_at}` : '--';
+  $('etfLog').textContent = (d.status?.log || []).slice(-100).join('\n');
+  renderETFPrediction(d);
+  renderETFSince(d);
+  renderETFHoldings(d);
+  renderETFTurnover(d);
+  renderETFValidation(d);
+  renderETFBoundary(d);
+  $('etfReport').textContent = d.report_markdown || '';
+}
+
+async function loadETF(){
+  $('etfMsg').textContent = '加载最新结果…';
+  try{
+    const r = await fetch('/api/etf159207/latest', {cache:'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    if (!d.ready){
+      $('etfMsg').textContent = d.message || '尚无运行结果，请点击 Run';
+      $('etfTag').textContent = '159207';
+      ['etfPredBody','etfSinceBody','etfTurnBody','etfValidBody','etfBoundBody']
+        .forEach(id => $(id).innerHTML = '');
+      $('etfHoldHead').innerHTML = '';
+      $('etfHoldBody').innerHTML = etfEmptyRow(7, '尚无结果，请点击 Run');
+      $('etfReport').textContent = '';
+      if (d.status?.running) startETFPoll();
+      return;
+    }
+    renderETF(d);
+    $('etfMsg').textContent = d.status?.running ? '分析运行中…' : '已加载最近一次结果';
+    if (d.status?.running) startETFPoll();
+  }catch(e){
+    $('etfMsg').textContent = '加载失败：' + e.message;
+  }
+}
+
+async function runETF(){
+  if (etfState.running) return;
+  etfState.running = true;
+  $('etfRunBtn').disabled = true;
+  $('etfMsg').textContent = '正在启动分析…';
+  $('etfLog').style.display = 'block';
+  $('etfLog').textContent = '';
+  try{
+    const r = await fetch('/api/etf159207/run', {method:'POST'});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+    $('etfMsg').textContent = '分析运行中…（刷新最新行情约 1~3 分钟）';
+    startETFPoll();
+  }catch(e){
+    etfState.running = false;
+    $('etfRunBtn').disabled = false;
+    $('etfMsg').textContent = '启动失败：' + e.message;
+  }
+}
+
+function startETFPoll(){
+  if (etfState.timer) clearInterval(etfState.timer);
+  etfState.running = true;
+  $('etfRunBtn').disabled = true;
+  $('etfLog').style.display = 'block';
+  const tick = async () => {
+    try{
+      const r = await fetch('/api/etf159207/status', {cache:'no-store'});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      $('etfLog').textContent = (d.log || []).slice(-100).join('\n') || '等待日志…';
+      $('etfMsg').textContent = d.running ? '分析运行中…' : '分析完成';
+      $('etfRunState').textContent = d.running ? 'running' : (d.last_run?.status || '--');
+      if (!d.running){
+        const ok = d.last_run?.status !== 'failed';
+        $('etfMsg').textContent = ok ? '分析完成' : '分析失败，请查看运行日志';
+        $('etfRunState').textContent = d.last_run?.status || (ok ? 'ok' : 'failed');
+        clearInterval(etfState.timer);
+        etfState.timer = null;
+        etfState.running = false;
+        $('etfRunBtn').disabled = false;
+        if (ok) await loadETF();
+      }
+    }catch(e){
+      $('etfMsg').textContent = '状态查询失败：' + e.message;
+    }
+  };
+  tick();
+  etfState.timer = setInterval(tick, 2000);
+}
 
 /* ---------- 移动端抽屉 ---------- */
 function openDrawer(){ $('sidebar').classList.add('open'); $('drawerMask').classList.add('open'); }
