@@ -1,6 +1,6 @@
 # 开发模式部署（腾讯云）— 极简版
 
-> 目标：**3 条命令启动**；更新代码只需 `git pull` + 重启调度器。不装 Nginx、不配 systemd。
+> 目标：**3 条命令启动**；更新代码只需 `git pull` + 重启调度器（新增了路由/页面时，Web 窗口也重启一次）。不装 Nginx、不配 systemd。
 > 下文以 `/opt/stock-cash-streaming` 为例，请按你的实际路径替换。
 
 ---
@@ -222,6 +222,7 @@ tmux new -s scs
 
 ```bash
 curl -s http://127.0.0.1:8000/api/health     # {"status":"ok"}
+curl -s http://127.0.0.1:8000/api/etf159207/status   # 159207 ETF 分析页后端
 .venv/bin/python -m stock_cash_streaming.cli status
 ```
 
@@ -249,9 +250,19 @@ git pull --ff-only          # 2) 拉取
 .venv/bin/pip install -e .
 ```
 
-- **Web**：`--reload` 会自动加载新代码，无需操作；
+- **Web**：`--reload` 通常会自动加载新代码；如果本次新增了 API 文件（例如 `service/etf_routes.py`）或页面，最稳妥的是到 tmux 窗口 0 按 `Ctrl+C` 后重新执行启动命令；
 - **调度器**：到 tmux 窗口 1 按 `Ctrl+C`，重新执行启动命令；
 - **数据库**：启动时自动执行 `init_schema`，新增表/列自动迁移，无需手工 SQL。
+
+### 3.1 本次新增：159207 高股息ETF 分析页
+
+左侧导航多了一组「ETF 分析 → 高股息ETF广发 · 159207」（`#/etf`），页面上方有 **Run** 按钮。
+
+- 首次打开如果没有任何结果，属正常：点 **Run** 后由后台子进程执行 `scripts/etf_159207_rebalance.py run`；
+- 冷启动（无缓存）约 1–3 分钟，要拉 50 只成分股的历史行情与分红；命中缓存后约 50 秒；
+- 需要出网访问 `fundmobapi.eastmoney.com`、`qt.gtimg.cn`、`push2his.eastmoney.com`；
+- 结果与缓存落在 `data/etf159207_cache/`（不进 Git），`metrics.json` 是页面读取的主文件；
+- 该任务与股票池任务互不影响，但同机不要同时跑多个写库任务（`data/pool_job.lock`）。
 
 更新前备份（建议）：
 
@@ -312,13 +323,15 @@ tail -f logs/app_$(date +%F).log
 | 8000 被占用 | `ss -lntp \| grep 8000`，`kill <PID>` 后重启 |
 | 时间偏 8 小时 | `sudo timedatectl set-timezone Asia/Shanghai` |
 | `database is locked` | 同时跑了两个写任务；只运行一个 `daily/recover/portfolio` |
-| 改代码页面没变 | Web 是否带 `--reload`；调度器需手动重启；浏览器硬刷新 |
+| 改代码页面没变 | Web 是否带 `--reload`；新增路由/页面时重启 Web 窗口；调度器需手动重启；浏览器硬刷新 |
+| ETF 页无数据 / Run 报 `Not Found` | 8000 上跑的还是旧进程（没有 `/api/etf159207/*`）。`ps -eo pid,cmd \| grep uvicorn` 找到 8000 的 PID，或在 tmux 窗口 0 按 `Ctrl+C` 重启；确认 `curl -s 127.0.0.1:8000/api/etf159207/status` 返回 JSON |
+| Run 报 `已有池任务运行中`(409) | 调度器持有 `data/pool_job.lock`，等它跑完，或临时停掉调度器窗口再点 Run |
 | 自定义股票池在哪 | 左侧导航「总览」→ 股票池卡片区：新建池（输入代码→解析名称→确认）、改名、增删成员、启动/更新、开关每日调度；内置 C0~C3 只读 |
 | 模拟持仓在哪 | 任意池详情页「③ 模拟持仓（10 万）」；首次点「初始化账户」回放该池历史（约 10–30 秒 / 池），之后每日自动跟随；也可 `cli paper --universe C1 --reset` |
 | 策略研究（研究 Hub）在哪 | 左侧导航「研究 → 策略研究」（`#/research`）：策略库 / 策略对比 / 因子实验室 / 因子择时 / 自然语言 五个 Tab；旧链接 `#/nl` 自动跳转。全 A 数据底座（行情/行业/指数/财报）按 runbook 5.1 维护，研究因子缓存在 `data/research_cache/` |
 | 调度器没触发 | `tmux a -t scs` 看进程；确认时区 |
 | 920010 拉取失败 | 北交所接口不支持，属预期 |
-| 磁盘不足 | 当前库约 2.9 GB（含全 A 行情），研究因子缓存约 10 MB，备份同体积，建议 50 GB+ |
+| 磁盘不足 | 以当前全 A 数据量：主库约 18 GB、研究因子缓存约 3.5 GB、ETF 分析缓存 <1 MB，备份同体积，建议 60 GB+ |
 
 ---
 
@@ -336,11 +349,14 @@ cd /opt/stock-cash-streaming && tmux has-session -t scs 2>/dev/null || {
 ```
 
 ```bash
-# 更新
+# 更新（Web 与调度器都重启，保证新增路由/页面生效）
 cd /opt/stock-cash-streaming && git pull --ff-only && \
   .venv/bin/pip install -r requirements.txt && .venv/bin/pip install -e . && \
+  tmux send-keys -t scs:web C-c && sleep 1 && \
+  tmux send-keys -t scs:web \
+    'cd /opt/stock-cash-streaming && .venv/bin/uvicorn stock_cash_streaming.service.app:app --host 0.0.0.0 --port 8000 --reload' Enter && \
   tmux send-keys -t scs:scheduler C-c && sleep 1 && \
   tmux send-keys -t scs:scheduler \
     'cd /opt/stock-cash-streaming && .venv/bin/python -m stock_cash_streaming.cli scheduler --time 16:10' Enter && \
-  echo "updated: web auto-reloads, scheduler restarted"
+  echo "updated: web + scheduler restarted"
 ```
