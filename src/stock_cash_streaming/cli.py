@@ -634,6 +634,26 @@ def _cmd_strat(args) -> None:
                     print(f"  {sid:<24} 失败：{e}")
             return
 
+        if args.action == "batch":
+            from .pipeline.research_jobs import run_daily_research
+
+            universes = [x.strip() for x in (args.universes or "").split(",") if x.strip()] or None
+            strategies = [x.strip() for x in (args.strategies or "").split(",") if x.strip()] or None
+            res = run_daily_research(repo, universes=universes, strategies=strategies)
+            print(f"\n===== 策略研究跑批 =====")
+            print(f"执行 {res.get('ran', 0)} / {res.get('total', 0)} 个组合")
+            for key, val in (res.get("items") or {}).items():
+                if val.get("status") == "ok":
+                    print(f"  {key:<44} 年化 {val['annual']:>7.2%}  夏普 {val['sharpe']:>5.2f}  "
+                          f"评分 {val['score']}")
+            failed = {k: v for k, v in (res.get("items") or {}).items()
+                      if v.get("status") == "failed"}
+            if failed:
+                print("失败：")
+                for k, v in failed.items():
+                    print(f"  {k:<44} {v.get('error', '')[:80]}")
+            return
+
         if args.action == "ic":
             res = ic_mod.run_ic(repo, universe=args.universe, start=args.start, end=args.end,
                                 horizons=tuple(int(x) for x in args.horizons.split(",")))
@@ -1178,9 +1198,11 @@ def main(argv: list[str] | None = None) -> None:
     p_mkt.set_defaults(func=_cmd_market)
 
     def _add_strat_args(p):
-        p.add_argument("action", choices=["list", "backtest", "compare", "ic", "meta"])
+        p.add_argument("action", choices=["list", "backtest", "compare", "batch", "ic", "meta"])
         p.add_argument("--strategy", default="value_quality", help="策略 ID（backtest 用）")
-        p.add_argument("--strategies", default="", help="逗号分隔的策略 ID（compare 用）")
+        p.add_argument("--strategies", default="", help="逗号分隔的策略 ID（compare/batch 用）")
+        p.add_argument("--universes", default="",
+                       help="逗号分隔的股票池（batch 用；默认内置+自定义池，跳过 A0）")
         p.add_argument("--universe", default="A0", help="样本域：A0/C0~C3/自定义池")
         p.add_argument("--start", default=None, help="开始日期")
         p.add_argument("--end", default=None, help="结束日期")

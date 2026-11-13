@@ -84,6 +84,14 @@ PORT=8000
 OPENAI_API_KEY=sk-xxxx
 OPENAI_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-flash
+
+# 小内存云主机（2 GB）建议显式设置，避免默认并发把机器打满
+SCS_INCREMENTAL_WORKERS=3
+SCS_INCREMENTAL_TIMEOUT=45
+SCS_MIN_AVAIL_GB=0.4
+SCS_DAILY_RESEARCH=1
+SCS_DAILY_RESEARCH_MAX_MEMBERS=300
+SCS_ETF_TIMEOUT=1800
 ```
 
 ### 1.4 数据
@@ -228,6 +236,41 @@ curl -s http://127.0.0.1:8000/api/etf159207/status   # 159207 ETF 分析页后�
 
 浏览器打开 `http://<云服务器公网IP>:8000`。
 
+### 2.1 每个交易日自动产出什么
+
+调度器（窗口 1）在工作日 **16:10** 跑一次 `daily`，依次产出并落库，页面只需直接打开：
+
+| 步骤 | 产出 | 落库位置 |
+|---|---|---|
+| 增量行情 | 所有板块/池成员日线 + 资金流 | `fact_quote` / `fact_stock_flow` |
+| 因子 | v2 技术/资金流、v3 基本面 | `fact_factor` |
+| 目标组合 | C0 生产组合 + 候选组合 | `fact_target_run/portfolio` |
+| 模拟跟踪 | 净值曲线 | `fact_tracking_nav` |
+| 模拟账户 | 各池 10 万纸面账户（**首次自动初始化**） | `fact_paper_*` |
+| 池任务 | 每个 `daily_enabled=1` 的池：数据/因子/回测/组合/跟踪/账户 | 同上（按池） |
+| 策略研究 | 内置池 + 自定义池 × 6 个策略回测 | `fact_strategy_run` |
+| ETF 分析 | 159207 前十大预测与报告 | `data/etf159207_cache/` |
+
+关键行为：
+
+- **数据不全不再整条停摆**：哪天行情只发布了一部分，流水线会按每个池「成员覆盖率 ≥90% 的最近交易日」降级推进，回测/组合/跟踪/账户照常更新；随后每 20 分钟重试，最多 6 次，直到当天数据补齐；
+- **ETF 独立重试**：16:40 起每 30 分钟重试，最多 4 次，失败保留上一次结果（页面仍可看到旧结果）；
+- **策略研究跳过 A0**：全 A 研究池在 2 GB 机器上跑不动，默认只跑内置池与自定义池（可用 `SCS_DAILY_RESEARCH_MAX_MEMBERS` 限制池规模）；
+- 手工补跑：`.venv/bin/python -m stock_cash_streaming.cli daily --force`。
+
+验证当天是否都跑了：
+
+```bash
+.venv/bin/python - <<'PY'
+import json, sqlite3
+c = sqlite3.connect('data/stock_cash_streaming.sqlite3'); c.row_factory = sqlite3.Row
+for tid in ('daily_20261113', 'etf_20261113'):
+    r = c.execute("SELECT task_id,status,started_at,ended_at,message FROM task_log "
+                  "WHERE task_id=? ORDER BY rowid DESC LIMIT 1", (tid,)).fetchone()
+    print(tid, dict(r)['status'] if r else 'missing')
+PY
+```
+
 不想用 tmux：
 
 ```bash
@@ -254,15 +297,15 @@ git pull --ff-only          # 2) 拉取
 - **调度器**：到 tmux 窗口 1 按 `Ctrl+C`，重新执行启动命令；
 - **数据库**：启动时自动执行 `init_schema`，新增表/列自动迁移，无需手工 SQL。
 
-### 3.1 本次新增：159207 高股息ETF 分析页
+### 3.1 159207 高股息ETF 分析页
 
-左侧导航多了一组「ETF 分析 → 高股息ETF广发 · 159207」（`#/etf`），页面上方有 **Run** 按钮。
+左侧导航「ETF 分析 → 高股息ETF广发 · 159207」（`#/etf`），页面上方有 **Run** 按钮。
 
-- 首次打开如果没有任何结果，属正常：点 **Run** 后由后台子进程执行 `scripts/etf_159207_rebalance.py run`；
-- 冷启动（无缓存）约 1–3 分钟，要拉 50 只成分股的历史行情与分红；命中缓存后约 50 秒；
+- 自动化：每个交易日 16:10 随 `daily` 流水线跑一次；16:40 起调度器每 30 分钟重试，最多 4 次；
+- 手动：点 **Run**，等价于执行 `scripts/etf_159207_rebalance.py run`；
+- 冷启动（无缓存）约 1–3 分钟，命中缓存约 20 秒；
 - 需要出网访问 `fundmobapi.eastmoney.com`、`qt.gtimg.cn`、`push2his.eastmoney.com`；
-- 结果与缓存落在 `data/etf159207_cache/`（不进 Git），`metrics.json` 是页面读取的主文件；
-- 该任务与股票池任务互不影响，但同机不要同时跑多个写库任务（`data/pool_job.lock`）。
+- 结果与缓存落在 `data/etf159207_cache/`（不进 Git），`metrics.json` 是页面读取的主文件。
 
 更新前备份（建议）：
 
@@ -325,6 +368,9 @@ tail -f logs/app_$(date +%F).log
 | `database is locked` | 同时跑了两个写任务；只运行一个 `daily/recover/portfolio` |
 | 改代码页面没变 | Web 是否带 `--reload`；新增路由/页面时重启 Web 窗口；调度器需手动重启；浏览器硬刷新 |
 | ETF 页无数据 / Run 报 `Not Found` | 8000 上跑的还是旧进程（没有 `/api/etf159207/*`）。`ps -eo pid,cmd \| grep uvicorn` 找到 8000 的 PID，或在 tmux 窗口 0 按 `Ctrl+C` 重启；确认 `curl -s 127.0.0.1:8000/api/etf159207/status` 返回 JSON |
+| 回测停在几天前 | 之前是行情不全导致整条 `daily` 被跳过；当前版本会按池降级推进。若仍落后，先看 `daily_YYYYMMDD` 的 status，再 `cli daily --force` |
+| 策略研究页全是「未运行」 | 每日跑批未执行或池成员数超过 `SCS_DAILY_RESEARCH_MAX_MEMBERS`；手工补：`cli strat batch --universes C0,C1` |
+| 模拟账户显示「未初始化」 | 池缺少调仓快照。点一次「启动/更新」即可；v2 起池任务会自动初始化账户 |
 | Run 报 `已有池任务运行中`(409) | 调度器持有 `data/pool_job.lock`，等它跑完，或临时停掉调度器窗口再点 Run |
 | 自定义股票池在哪 | 左侧导航「总览」→ 股票池卡片区：新建池（输入代码→解析名称→确认）、改名、增删成员、启动/更新、开关每日调度；内置 C0~C3 只读 |
 | 模拟持仓在哪 | 任意池详情页「③ 模拟持仓（10 万）」；首次点「初始化账户」回放该池历史（约 10–30 秒 / 池），之后每日自动跟随；也可 `cli paper --universe C1 --reset` |

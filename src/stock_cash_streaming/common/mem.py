@@ -38,16 +38,48 @@ def rss_gb() -> float:
         return 0.0
 
 
-def min_available_gb() -> float:
+def total_gb() -> float:
+    """系统物理内存（GB）；读取失败时返回无穷大。"""
     try:
-        return float(os.getenv("SCS_MIN_AVAIL_GB", "6"))
-    except ValueError:
-        return 6.0
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / 1048576
+    except OSError:
+        pass
+    return float("inf")
+
+
+def min_available_gb() -> float:
+    """保底可用内存阈值。
+
+    未显式设置 `SCS_MIN_AVAIL_GB` 时按物理内存的 20% 自适应：
+    32 GB 机器约 6.4 GB，2 GB 云主机约 0.4 GB。原先固定 6 GB 会让 2 GB
+    的云主机在第一次读因子时就中止，页面长期空白。
+    """
+    raw = os.getenv("SCS_MIN_AVAIL_GB")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    total = total_gb()
+    if total != float("inf"):
+        return max(0.3, round(total * 0.2, 2))
+    return 6.0
+
+
+def _cap_need(need: float) -> float:
+    """把单步需求压到物理内存的 60% 以内，避免小机器上阈值永远达不到。"""
+    total = total_gb()
+    if total == float("inf"):
+        return need
+    return min(need, max(0.2, round(total * 0.6, 2)))
 
 
 def ensure_memory(need_gb: float | None = None, tag: str = "") -> None:
     """确认可用内存足够；不足则抛 MemoryGuardError（附当前余量与 RSS）。"""
-    need = min_available_gb() if need_gb is None else need_gb
+    need = min_available_gb() if need_gb is None else _cap_need(need_gb)
     avail = available_gb()
     if avail < need:
         raise MemoryGuardError(

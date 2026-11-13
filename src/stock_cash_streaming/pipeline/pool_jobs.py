@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,6 +22,7 @@ from ..config.settings import get_settings
 from ..features.engine import FACTOR_VERSION, compute_all
 from ..features.fundamentals import compute_fundamental_factors
 from ..ingest.fundamentals import sync_fundamentals
+from ..ingest.incremental import latest_complete_quote_date
 from ..ingest.universe_sync import sync_symbols
 from ..research.pool_admin import (
     PoolError,
@@ -151,8 +153,13 @@ def backtest_state(repo: Repository, pool_id: str, latest: str | None,
     return ("stale" if stale else "latest"), run
 
 
-def _factors_ready(repo: Repository, symbols: list[str], trade_date: str | None) -> bool:
-    """该池在 trade_date 的 v2 因子是否已覆盖全部成员（用 vol_20 作为判据）。"""
+def _factors_ready(repo: Repository, symbols: list[str], trade_date: str | None,
+                   min_ratio: float = 0.95) -> bool:
+    """该池在 trade_date 的 v2 因子是否基本齐全（用 vol_20 作为判据）。
+
+    阈值放宽到 95%：少数停牌/退市成员永远补不齐，若按 100% 判定，每个池每天
+    都会全量重算因子（云端一次几百万行，2 GB 机器容易被打爆）。
+    """
     if not symbols or not trade_date:
         return False
     ph = ",".join("?" for _ in symbols)
@@ -160,7 +167,7 @@ def _factors_ready(repo: Repository, symbols: list[str], trade_date: str | None)
         f"SELECT COUNT(DISTINCT symbol) AS n FROM fact_factor "
         f"WHERE version=? AND factor='vol_20' AND trade_date=? AND symbol IN ({ph})",
         tuple([FACTOR_VERSION, trade_date] + symbols))[0]["n"]
-    return int(n) >= len(symbols)
+    return int(n) >= max(1, int(len(symbols) * min_ratio))
 
 
 # ---------- 主任务 ----------
@@ -219,7 +226,8 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
                 st = sync_symbols(repo, missing, start_date="20180101", with_flow=True)
                 step("data", "ok",
                      f"补全 {len(missing)} 只历史行情（成功 {st['price_ok']}，失败 {st['price_fail']}）")
-            if stale:
+            refetch_stale = os.getenv("SCS_POOL_REFETCH_STALE", "0") == "1"
+            if stale and refetch_stale:
                 ph = ",".join("?" for _ in stale)
                 have_flow = {r["symbol"] for r in repo.query(
                     f"SELECT DISTINCT symbol FROM fact_stock_flow WHERE symbol IN ({ph})",
@@ -235,13 +243,21 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
                     st = sync_symbols(repo, noflow, start_date=start, with_flow=True)
                     ok += st["price_ok"]
                 step("data", "ok", f"增量补拉 {len(stale)} 只（成功 {ok}）")
+            elif stale:
+                step("data", "skipped",
+                     f"{len(stale)} 只落后于全市场，由每日增量统一补齐")
             if not missing and not stale:
                 step("data", "skipped", f"已是 {latest}")
         except Exception as e:  # noqa: BLE001
             step("data", "failed", str(e))
             return finish("failed", str(e))
 
-        latest_data = repo.query("SELECT MAX(trade_date) AS d FROM fact_quote")[0]["d"]
+        # 用池级「最近完整交易日」作为基准：云端数据源分批发布时，池内多数成员
+        # 已更新即可推进回测/组合，不必等全市场所有标的都到齐。
+        latest_data = (latest_complete_quote_date(repo, symbols)
+                       or repo.query("SELECT MAX(trade_date) AS d FROM fact_quote")[0]["d"])
+        if latest_data and latest and latest_data < latest:
+            step("data", "ok", f"按池内最近完整交易日 {latest_data} 推进（全市场 {latest}）")
 
         # 3) 财务 / 上市日（ETF 无财务）
         non_etf = [s for s in symbols if not is_etf(s)]
@@ -266,11 +282,10 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
             step("fundamentals", "failed", str(e))
             return finish("failed", str(e))
 
-        # 4) 因子
+        # 4) 因子：每日流水线已对全部池成员统一算过，这里只在覆盖率不足时补算
         try:
-            data_updated = bool(missing or stale)
-            if not force and not data_updated and _factors_ready(repo, symbols, latest_data):
-                step("factors", "skipped", f"{latest_data} 因子已齐全")
+            if not force and _factors_ready(repo, symbols, latest_data):
+                step("factors", "skipped", f"{latest_data} 因子已覆盖 ≥95% 成员")
             else:
                 stats = compute_all(repo, symbols=symbols)
                 msg = f"v2 {len(stats)} 个因子"
@@ -372,6 +387,16 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
                     step("tracking", "ok" if tr.get("status") == "running" else "skipped", msg)
             except Exception as e:  # noqa: BLE001
                 step("tracking", "failed", str(e))
+
+            # 模拟账户：首次自动初始化，之后按新的调仓快照增量重放
+            try:
+                from ..strategy.paper import refresh_paper_account
+
+                pp = refresh_paper_account(repo, pool_id)
+                step("paper", "ok" if not pp.get("error") else "skipped",
+                     f"总资产 {pp.get('total_value', pp.get('status', ''))}")
+            except Exception as e:  # noqa: BLE001
+                step("paper", "failed", str(e))
 
         # 8) 成员月度快照（每月首个交易日写一次，降低未来幸存者偏差）
         try:

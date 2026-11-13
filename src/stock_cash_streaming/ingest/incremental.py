@@ -1,5 +1,7 @@
 """每日增量拉取：行情（腾讯 hfq）、个股资金流快照、板块资金流（同花顺）。"""
 
+import math
+import os
 import threading
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -84,6 +86,39 @@ def _target_symbols(repo: Repository) -> list[str]:
     return [s for items in seeds.values() for s, _ in items]
 
 
+def latest_complete_quote_date(repo: Repository, symbols: list[str],
+                               min_ratio: float = 0.9,
+                               lookback_days: int = 40) -> str | None:
+    """最近一个成员行情覆盖率 ≥ `min_ratio` 的交易日。
+
+    用途：云主机上数据源收盘后分批发布，当日可能只更到一部分标的。与其让
+    整条流水线空转（历史上导致回测连续 10 个交易日不推进），不如让每个股票池
+    按「自己成员最近完整的那一天」降级运行。
+
+    覆盖率分母取「库内至少有一条行情的成员数」，避免长期停牌/退市成员把比例
+    永久压在阈值以下。
+    """
+    syms = list(dict.fromkeys(str(s) for s in symbols))
+    if not syms:
+        return None
+    ph = ",".join("?" for _ in syms)
+    rows = repo.query(
+        f"SELECT trade_date, COUNT(*) AS n FROM fact_quote "
+        f"WHERE symbol IN ({ph}) GROUP BY trade_date "
+        f"ORDER BY trade_date DESC LIMIT ?",
+        tuple(syms) + (max(1, int(lookback_days)),))
+    if not rows:
+        return None
+    have = repo.query(
+        f"SELECT COUNT(DISTINCT symbol) AS n FROM fact_quote WHERE symbol IN ({ph})",
+        tuple(syms))[0]["n"]
+    need = max(1, math.ceil(int(have) * min_ratio))
+    for r in rows:
+        if int(r["n"]) >= need:
+            return r["trade_date"]
+    return None
+
+
 def _fill_pct_chg(repo: Repository, symbol: str, df: pd.DataFrame) -> None:
     """补齐请求窗口首日缺失的涨跌幅。
 
@@ -125,27 +160,54 @@ def run_incremental(ds: DataSource, repo: Repository, lookback_days: int = 10) -
     start = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y%m%d")
     stats = {"price_ok": 0, "price_fail": 0, "flow_rows": 0, "sector_flow": 0}
     symbols = _target_symbols(repo)
-    logger.info(f"增量目标成分 {len(symbols)} 只")
+    workers = max(1, int(os.getenv("SCS_INCREMENTAL_WORKERS", "1")))
+    timeout = int(os.getenv("SCS_INCREMENTAL_TIMEOUT", "90"))
+    logger.info(f"增量目标成分 {len(symbols)} 只（并发 {workers}）")
 
-    # 1) 行情
-    for i, sym in enumerate(symbols, 1):
+    # 1) 行情：先在 worker 里并发抓取（只做网络 IO），再在主线程串行入库，
+    #    避免多线程写同一个 SQLite 连接。云主机单线程逐只抓 400+ 只经常跑不完。
+    def _fetch(sym: str) -> tuple[str, pd.DataFrame | None, str | None]:
         try:
             df = _with_timeout(
-                lambda s=sym: ds.daily_prices(s, start, today_compact), 90, pd.DataFrame())
-            if not df.empty:
-                _fill_pct_chg(repo, sym, df)
-                rows = df.to_dict("records")
-                for r in rows:
-                    r.update({"symbol": sym, "src": "akshare:hfq", "fetched_at": now})
-                repo.upsert("fact_quote", rows, ["symbol", "trade_date"])
-                stats["price_ok"] += 1
-            else:
-                stats["price_fail"] += 1
+                lambda s=sym: ds.daily_prices(s, start, today_compact), timeout,
+                pd.DataFrame())
+            return sym, df, None
         except Exception as e:  # noqa: BLE001
+            return sym, None, str(e)
+
+    fetched: list[tuple[str, pd.DataFrame | None, str | None]] = []
+    if workers == 1:
+        for sym in symbols:
+            fetched.append(_fetch(sym))
+            if len(fetched) % 10 == 0:
+                logger.info(f"  行情进度 {len(fetched)}/{len(symbols)}")
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_fetch, s) for s in symbols]
+            for i, fut in enumerate(as_completed(futures), 1):
+                fetched.append(fut.result())
+                if i % 10 == 0:
+                    logger.info(f"  行情进度 {i}/{len(symbols)}")
+
+    failed: list[str] = []
+    for sym, df, err in fetched:
+        if err or df is None or df.empty:
             stats["price_fail"] += 1
-            logger.warning(f"增量行情失败 {sym}: {e}")
-        if i % 10 == 0:
-            logger.info(f"  行情进度 {i}/{len(symbols)}")
+            failed.append(sym)
+            if err:
+                logger.warning(f"增量行情失败 {sym}: {err}")
+            continue
+        _fill_pct_chg(repo, sym, df)
+        rows = df.to_dict("records")
+        for r in rows:
+            r.update({"symbol": sym, "src": "akshare:hfq", "fetched_at": now})
+        repo.upsert("fact_quote", rows, ["symbol", "trade_date"])
+        stats["price_ok"] += 1
+    if failed:
+        stats["failed_symbols"] = failed[:50]
+        logger.warning(f"增量行情失败 {len(failed)} 只（示例 {failed[:8]}）")
 
     # 2) 个股资金流（腾讯全市场快照，一次调用）
     try:

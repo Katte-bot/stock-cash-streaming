@@ -8,6 +8,8 @@
 - 启动时若当天已过点且尚未成功运行，会立即补跑一次；
 - 行情数据源收盘后分批发布日线，若当日覆盖不全（流水线返回 `retryable`），
   每隔 `RETRY_INTERVAL_MIN` 分钟重试，最多 `MAX_ATTEMPTS` 次；
+- ETF(159207) 分析在 `ETF_TIME`（默认 16:40）后单独重试，最多 4 次，
+  避免被主流水线的其它步骤拖着一起失败；
 - 失败不自动重试（需手动执行 `cli daily` 排查）。
 """
 
@@ -23,11 +25,13 @@ from .daily import run_daily_pipeline
 
 RETRY_INTERVAL_MIN = 20    # 行情未发布完整时的重试间隔（分钟）
 MAX_ATTEMPTS = 6           # 每个交易日最多尝试次数（约覆盖 2 小时）
+ETF_TIME = "16:40"         # ETF 分析重试起点
+ETF_RETRY_INTERVAL_MIN = 30
+ETF_MAX_ATTEMPTS = 4
 
 
-def _task_state(day: str) -> tuple[str | None, bool]:
-    """读取当日流水线状态：返回 (status, 是否可重试)。无记录时为 (None, False)。"""
-    task_id = f"daily_{day.replace('-', '')}"
+def _state_by_task(task_id: str) -> tuple[str | None, bool]:
+    """读取任务状态：返回 (status, 是否可重试)。无记录时为 (None, False)。"""
     repo = open_repository()
     try:
         rows = repo.query("SELECT status, message FROM task_log WHERE task_id=?", (task_id,))
@@ -44,25 +48,43 @@ def _task_state(day: str) -> tuple[str | None, bool]:
     return status, retryable
 
 
+def _task_state(day: str) -> tuple[str | None, bool]:
+    return _state_by_task(f"daily_{day.replace('-', '')}")
+
+
+def _etf_state(day: str) -> tuple[str | None, bool]:
+    return _state_by_task(f"etf_{day.replace('-', '')}")
+
+
 def run_scheduler(target_time: str = "16:10", force: bool = False) -> None:
     try:
         hh, mm = (int(x) for x in target_time.split(":"))
+        eh, em = (int(x) for x in ETF_TIME.split(":"))
     except ValueError as e:
         raise ValueError(f"时间格式应为 HH:MM，收到 {target_time}") from e
 
-    logger.info(f"每日调度器已启动：工作日 {hh:02d}:{mm:02d} 运行流水线")
-    attempts: dict[str, int] = {}     # 当日已尝试次数
+    logger.info(f"每日调度器已启动：工作日 {hh:02d}:{mm:02d} 运行流水线，"
+                f"{eh:02d}:{em:02d} 起重试 ETF 分析")
+    attempts: dict[str, int] = {}        # 当日流水线已尝试次数
+    etf_attempts: dict[str, int] = {}    # 当日 ETF 已尝试次数
     last_attempt: datetime | None = None
+    last_etf: datetime | None = None
     while True:
         now = datetime.now()
         day = now.strftime("%Y-%m-%d")
         target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        etf_target = now.replace(hour=eh, minute=em, second=0, microsecond=0)
         cooled = (last_attempt is None
                   or (now - last_attempt).total_seconds() >= RETRY_INTERVAL_MIN * 60)
+        etf_cooled = (last_etf is None
+                      or (now - last_etf).total_seconds() >= ETF_RETRY_INTERVAL_MIN * 60)
+
         if now.weekday() < 5 and now >= target and cooled \
                 and attempts.get(day, 0) < MAX_ATTEMPTS:
             status, retryable = _task_state(day)
-            if status == "ok" or status == "failed" or (status == "skipped" and not retryable):
+            # 降级运行（数据未完整）也标记 retryable：当天数据补齐后再跑一次
+            if (status == "ok" and not retryable) or status == "failed" \
+                    or (status == "skipped" and not retryable):
                 logger.info(f"{day} 已处理（{status}），跳过")
                 attempts[day] = MAX_ATTEMPTS
             else:
@@ -78,4 +100,24 @@ def run_scheduler(target_time: str = "16:10", force: bool = False) -> None:
                                        f"请手动执行 cli daily 检查数据源")
                 except Exception as e:  # noqa: BLE001
                     logger.exception(f"{day} 流水线异常：{e}")
+
+        # ETF 分析单独重试（主流水线已成功则跳过）
+        if now.weekday() < 5 and now >= etf_target and etf_cooled \
+                and etf_attempts.get(day, 0) < ETF_MAX_ATTEMPTS:
+            status, _ = _etf_state(day)
+            if status == "ok":
+                etf_attempts[day] = ETF_MAX_ATTEMPTS
+            else:
+                last_etf = now
+                etf_attempts[day] = etf_attempts.get(day, 0) + 1
+                logger.info(f"{day} 第 {etf_attempts[day]} 次触发 ETF 分析")
+                try:
+                    from .etf_job import run_etf_analysis
+
+                    r = run_etf_analysis()
+                    logger.info(f"{day} ETF 分析结束：{r.get('status')} "
+                                f"{r.get('elapsed_s', '')}s")
+                except Exception as e:  # noqa: BLE001
+                    logger.exception(f"{day} ETF 分析异常：{e}")
+
         time.sleep(30)

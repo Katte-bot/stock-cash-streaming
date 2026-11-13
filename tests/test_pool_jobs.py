@@ -106,20 +106,23 @@ def test_all_latest_skipped(repo, monkeypatch):
     _noop_mocks(monkeypatch, called)
 
     res = pool_jobs.run_pool_job(repo, "U1", lock_held=True)
-    assert res["status"] == "skipped"
+    # 数据/回测/组合/跟踪全部跳过，但模拟账户每次都会重放刷新（新增 paper 步骤）
+    assert res["status"] == "ok"
     assert called == {"sync": 0, "bt": 0, "pf": 0, "tr": 0}
 
     steps = {a["step"]: a["status"] for a in res["actions"]}
     assert steps["data"] == "skipped"
     assert steps["backtest"] == "skipped"
+    assert steps["paper"] == "ok"
     assert steps["schedule"] == "skipped"
 
     job = pool_jobs.get_pool_job(repo, "U1")
-    assert job["status"] == "skipped"
+    assert job["status"] == "ok"
     assert job["actions"]
 
 
 def test_stale_data_and_backtest_trigger(repo, monkeypatch):
+    monkeypatch.delenv("SCS_POOL_REFETCH_STALE", raising=False)
     _seed(repo, backtest_end="2026-10-20", last_dates=(LATEST, "2026-10-24"),
           with_factors=False, with_portfolio=False, with_tracking=False)
     called = {"sync": 0, "bt": 0, "pf": 0, "tr": 0}
@@ -127,7 +130,8 @@ def test_stale_data_and_backtest_trigger(repo, monkeypatch):
 
     res = pool_jobs.run_pool_job(repo, "U1", lock_held=True)
     assert res["status"] == "ok"
-    assert called["sync"] == 1
+    # 落后成员默认交给每日增量统一补拉，池任务不再自己回补
+    assert called["sync"] == 0
     assert called["bt"] == 1
     assert called["pf"] == 1
     assert called["tr"] == 1

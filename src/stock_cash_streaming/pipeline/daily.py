@@ -15,7 +15,9 @@ from ..common.logging import logger
 from ..datasource.registry import get_source
 from ..features.engine import compute_all
 from ..features.fundamentals import compute_fundamental_factors
-from ..ingest.incremental import is_trading_day, run_incremental
+from ..ingest.incremental import (
+    is_trading_day, latest_complete_quote_date, run_incremental,
+)
 from ..research.universe import C0, universe_symbols
 from ..storage.repository import open_repository
 from ..strategy.portfolio import STRATEGY_NAMES, build_target_portfolio
@@ -82,22 +84,26 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
             result["steps"]["incremental"] = run_incremental(get_source(), repo, lookback_days)
         except Exception as e:  # noqa: BLE001
             result["steps"]["incremental"] = {"error": str(e)}
-            result.update(status="failed", error=f"增量失败: {e}")
-            return result
+            logger.warning(f"增量失败，继续用库内已有数据: {e}")
 
         after = _latest_quote_date(repo)
         result["quote_after"] = after
-        if after != today and not force:
-            result.update(status="skipped", retryable=True,
-                          reason=f"行情未更新到今日（最新 {after}）")
-            return result
         today_n, prev_n = _quote_coverage(repo)
         result["quote_coverage"] = {"today": today_n, "prev": prev_n}
-        if not force and after == today and prev_n and today_n < prev_n * MIN_COVERAGE_RATIO:
-            result.update(status="skipped", retryable=True,
-                          reason=(f"{today} 行情仅覆盖 {today_n} 只（上一交易日 {prev_n} 只），"
-                                  f"数据源尚未发布完整"))
-            return result
+
+        # 数据不全时不再整条停摆：按「最近完整交易日」降级运行，
+        # 让回测/目标组合/池任务/模拟账户每天都能推进（云端数据源分批发布）。
+        c0_symbols = universe_symbols(repo, C0)
+        as_of = latest_complete_quote_date(repo, c0_symbols) or after
+        result["data_as_of"] = as_of
+        complete = bool(after == today and (not prev_n or today_n >= prev_n * MIN_COVERAGE_RATIO))
+        result["data_complete"] = complete
+        if not complete:
+            result["degraded"] = (
+                f"行情未完整（最新 {after}，覆盖 {today_n}/{prev_n or '-'}），"
+                f"按最近完整交易日 {as_of} 降级运行")
+            result["retryable"] = True
+            logger.warning(result["degraded"])
 
         # 2) 因子（v2 技术/资金流 + v3 基本面）
         # 只算「日更池」成员（板块成分 + 内置/自定义池）：全 A 研究因子由
@@ -119,13 +125,15 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
         result["steps"]["signals"] = {"count": len(sigs)}
 
         # 4) 目标组合与调仓清单（生产 + 候选纸面跟踪，各自独立 strategy 名）
-        pf = build_target_portfolio(repo, persist=True)
+        pf = build_target_portfolio(repo, trade_date=as_of, persist=True)
         result["steps"]["portfolio"] = {
+            "trade_date": as_of,
             "positions": len(pf.get("positions", [])),
             "action": pf.get("action"),
             "exposure": pf.get("exposure"),
         }
-        cand = build_target_portfolio(repo, persist=True, strategy="defensive_valuation")
+        cand = build_target_portfolio(repo, trade_date=as_of, persist=True,
+                                      strategy="defensive_valuation")
         result["steps"]["portfolio_candidate"] = {
             "strategy": cand.get("strategy"),
             "positions": len(cand.get("positions", [])),
@@ -174,6 +182,25 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"池任务执行失败: {e}")
             result["steps"]["pool_jobs"] = {"error": str(e)}
+
+        # 8) 策略研究每日跑批（内置池 + 自定义池，跳过 A0，结果写 fact_strategy_run）
+        try:
+            from .research_jobs import run_daily_research
+
+            result["steps"]["research"] = run_daily_research(repo)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"策略研究跑批失败: {e}")
+            result["steps"]["research"] = {"error": str(e)}
+
+        # 9) ETF（159207）分析：子进程隔离内存，失败保留上次结果
+        try:
+            from .etf_job import etf_ran_ok_today, run_etf_analysis
+
+            result["steps"]["etf"] = ({"status": "skipped", "reason": "今日已成功运行"}
+                                      if etf_ran_ok_today() else run_etf_analysis())
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"ETF 分析失败: {e}")
+            result["steps"]["etf"] = {"error": str(e)}
 
         result["status"] = "ok"
         logger.info(f"每日流水线完成 {today}: {result['status']}")

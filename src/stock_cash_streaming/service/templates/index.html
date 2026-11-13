@@ -1118,8 +1118,10 @@ function applyView(){
     loadUniverses();
   } else if (isResearch){
     switchRTab(p.tab || 'lib', false);
-    loadResearch();
-    if (p.detail) openStrategyDetail(p.detail);
+    fillResearchUniverses().then(() => {
+      loadResearch();
+      if (p.detail) openStrategyDetail(p.detail);
+    });
   } else if (isNL){
     nlFillUniverses();
     loadNLStrategies();
@@ -1154,6 +1156,25 @@ function switchRTab(tab, updateHash=true){
 }
 
 function _rUniverse(){ return $('rUniverse')?.value || 'A0'; }
+
+/* 样本域下拉：A0 + 全部股票池（含用户自建池），与「策略研究」后端 universe 参数一致 */
+async function fillResearchUniverses(){
+  const sel = $('rUniverse');
+  if (!sel) return;
+  if (!(poolsState.list || []).length){
+    try{
+      const r = await fetch('/api/pools', {cache:'no-store'});
+      const d = await r.json();
+      poolsState.list = Array.isArray(d) ? d : (d.items || d.pools || []);
+    }catch(e){ return; }
+  }
+  const cur = sel.value || researchState.universe || 'A0';
+  const pools = (poolsState.list || []).filter(p => p.id !== 'A0');
+  sel.innerHTML = `<option value="A0">A0 全 A（研究）</option>` + pools.map(p =>
+    `<option value="${p.id}">${p.is_custom ? p.id + ' ' + p.name : (p.name || p.id)}（${p.members_count ?? 0} 只）</option>`
+  ).join('');
+  if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+}
 
 async function loadResearch(){
   const u = _rUniverse();
