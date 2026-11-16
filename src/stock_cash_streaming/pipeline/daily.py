@@ -64,7 +64,7 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
     started = datetime.now()
     today = started.strftime("%Y-%m-%d")
     task_id = f"daily_{started.strftime('%Y%m%d')}"
-    result: dict = {"task_id": task_id, "date": today, "status": "ok", "steps": {}}
+    result: dict = {"task_id": task_id, "date": today, "status": "running", "steps": {}}
     # 与池任务共用跨进程锁：池任务运行中时让路，避免并发写库
     lock = try_acquire_job_lock()
     if lock is None:
@@ -211,6 +211,10 @@ def run_daily_pipeline(force: bool = False, lookback_days: int = 10) -> dict:
         return result
     finally:
         ended = datetime.now()
+        # Ctrl+C / 进程被杀时不会进入 except Exception，若仍是 running 说明被中断，
+        # 必须记为 failed，否则调度器会误判「今天已完成」而不再补跑。
+        if result.get("status") == "running":
+            result.update(status="failed", error="任务被中断（KeyboardInterrupt 或进程退出）")
         try:
             repo.log_task(
                 task_id, "daily", result.get("status", "unknown"),

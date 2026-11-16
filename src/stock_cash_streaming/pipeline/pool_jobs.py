@@ -428,6 +428,11 @@ def run_pool_job(repo: Repository, pool_id: str, force: bool = False,
         if work and all(a["status"] == "skipped" for a in work):
             return finish("skipped")
         return finish("ok")
+    except KeyboardInterrupt:
+        # 中断也要落一个 failed，否则 task_log 会一直停在 running
+        step("system", "failed", "任务被中断")
+        finish("failed", "任务被中断（KeyboardInterrupt）")
+        raise
     except Exception as e:  # noqa: BLE001
         logger.exception(f"池任务 {pool_id} 异常: {e}")
         step("system", "failed", str(e))
