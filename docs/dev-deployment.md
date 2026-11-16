@@ -234,9 +234,39 @@ curl -s http://127.0.0.1:8000/api/etf159207/status   # 159207 ETF 分析页后�
 .venv/bin/python -m stock_cash_streaming.cli status
 ```
 
+### 2.1 路径与窗口名以实际为准
+
+文档里的 `/opt/stock-cash-streaming` 与窗口名 `web` / `scheduler` 只是示例。如果你的代码在
+`/home/ubuntu/workspace/stock-cash-streaming`，或 tmux 窗口是 `0` / `1`，先确认：
+
+```bash
+pwd
+tmux ls
+tmux list-windows -t scs -F '#{window_index}  #{window_name}  #{pane_current_command}'
+```
+
+按输出里的序号重启（示例：web=0，scheduler=1）：
+
+```bash
+P=$(pwd)
+tmux send-keys -t scs:0 C-c
+tmux send-keys -t scs:0 "cd $P && .venv/bin/uvicorn stock_cash_streaming.service.app:app --host 0.0.0.0 --port 8000 --reload" Enter
+tmux send-keys -t scs:1 C-c
+tmux send-keys -t scs:1 "cd $P && .venv/bin/python -m stock_cash_streaming.cli scheduler --time 16:10" Enter
+```
+
+也可以先改名，让后续命令与文档一致：
+
+```bash
+tmux rename-window -t scs:0 web
+tmux rename-window -t scs:1 scheduler
+```
+
+若只有一个窗口、两个左右/上下分屏，则用 `-t scs:0.0` 与 `-t scs:0.1`。
+
 浏览器打开 `http://<云服务器公网IP>:8000`。
 
-### 2.1 每个交易日自动产出什么
+### 2.2 每个交易日自动产出什么
 
 调度器（窗口 1）在工作日 **16:10** 跑一次 `daily`，依次产出并落库，页面只需直接打开：
 

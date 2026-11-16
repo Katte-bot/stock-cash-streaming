@@ -6,8 +6,17 @@
 """
 
 from functools import lru_cache
+from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 让直接用 os.getenv 读取的开关（如 SCS_INCREMENTAL_WORKERS、SCS_DAILY_RESEARCH、
+# SCS_MIN_AVAIL_GB）也能从 .env 生效；真实环境变量优先。
+# 与 Settings 的 env_file=".env" 保持一致：按「启动时的当前目录」解析。
+_env_file = Path.cwd() / ".env"
+if _env_file.exists():
+    load_dotenv(_env_file, override=False)
 
 
 class Settings(BaseSettings):
