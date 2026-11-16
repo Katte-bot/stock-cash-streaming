@@ -70,9 +70,13 @@ def min_available_gb() -> float:
 
 
 def _cap_need(need: float) -> float:
-    """把单步需求压到物理内存的 60% 以内，避免小机器上阈值永远达不到。"""
+    """把单步需求压到物理内存的 60% 以内，避免小机器上阈值永远达不到。
+
+    明显不合理的需求（超过物理内存 10 倍）原样保留，让护栏直接拒绝，
+    否则调用方写了天文数字也会被静默放行。
+    """
     total = total_gb()
-    if total == float("inf"):
+    if total == float("inf") or need > total * 10:
         return need
     return min(need, max(0.2, round(total * 0.6, 2)))
 
